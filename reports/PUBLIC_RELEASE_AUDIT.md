@@ -1,25 +1,25 @@
-# Auditoría del paquete público EMG
+# Auditoría del paquete público EMG — F31
 
-**Fecha:** 17 de octubre de 2026  
-**Estado:** candidato seguro auditado localmente; la publicación remota se verifica por separado.
+**Fecha:** 18 de octubre de 2026
+**Estado:** candidato público agregado actualizado; la publicación remota se verificará contra el commit de cierre.
 
 ## Contenido y exclusiones
 
-El paquete contiene 14 módulos Python portables, dos bibliografías consolidadas, instrucciones, una nota metodológica y la edición pública del informe IEEE en DOCX/PDF. No incluye archivos CSV/XLSX/NPY/NPZ, señales locales o externas, metadatos de participantes, características, etiquetas, particiones, predicciones, métricas por persona/pliegue/canal, recibos privados, modelos serializados ni figuras de casos. Se excluyó `participants.csv` y no se usó para el análisis.
+El paquete contiene 16 módulos Python, dos bibliografías consolidadas, instrucciones, el informe IEEE público F31 en DOCX/PDF, el heatmap y el resumen agregado por pierna/serie. No contiene archivos de participantes, señales locales o externas, métricas por persona/pliegue/canal, etiquetas, características, particiones, predicciones, recibos privados, modelos serializados ni figuras de caso. `participants.csv` se excluyó y no se usó para esta evaluación.
 
-La edición pública del informe conserva solo los resultados agregados locales y las figuras locales agregadas. Se quitaron las trazas, métricas por canal, probabilidades y figura correspondientes a la comprobación externa de una sola grabación. El informe de revisión local conserva esos elementos. Ninguna señal de los 15 participantes está en este paquete.
+El informe público conserva resultados agregados locales. Se eliminaron las figuras de R0/R0_1, los puntos de rendimiento por participante y la señal de una grabación individual; también se borraron del DOCX los medios incrustados sin uso. Las 44 referencias consolidadas permanecen sin cambios.
 
 ## Controles verificados
 
-- 14/14 módulos se compilaron y su ayuda `--help` terminó correctamente sin leer señales ni entrenar modelos.
-- DOCX con 44 referencias consecutivas, tres tablas (incluido el esquema editable) y cuatro figuras agregadas más el membrete institucional; sin comentarios activos o checklist de envío.
-- PDF exportado desde Word, 12 páginas renderizadas e inspeccionadas visualmente; sin figuras externas, desbordes ni tablas rotas.
-- Las dos bibliografías se compararon byte a byte con los archivos consolidados del proyecto y permanecen intactas.
-- No se encontraron rutas locales, credenciales o datos individuales en los archivos de texto del paquete.
-- La métrica del modelo corresponde al proxy de tercios temporales, no a fatiga; no hay ground truth independiente local y no se define umbral fisiológico.
+- Los 16 módulos compilan; los módulos de lateralidad y filtros rechazan entradas o salidas ubicadas dentro del checkout público.
+- Las pruebas verifican agregación por persona, heatmap izquierda/derecha y controles de ruta; `--help` no lee grabaciones ni entrena.
+- DOCX con 44 referencias, 15 tablas nativas y ocho figuras agregadas o esquemas editables; sin checklist de envío, placeholders ni contenido individual de las tres figuras retiradas.
+- PDF exportado desde Word en A4, con 22 páginas renderizadas e inspeccionadas; no se detectaron desbordes ni tablas rotas.
+- Las dos bibliografías se cotejaron con las versiones consolidadas y no se modificaron.
+- La matriz por lado reporta 14 grupos izquierdos y 15 derechos, con 14 pareados; la diferencia Macro-F1 incluye cero.
 
-## Límites científicos
+## Alcance científico
 
-La comprobación externa se hizo después de congelar el clasificador y solo examinó el proxy temporal; no se distribuyen sus resultados por ensayo ni se presenta como validación fisiológica. Las señales locales no tienen fuerza/torque sincronizada, sitio muscular local confirmado, fase de repetición validada ni calibración física de amplitud. MDF/MNF descendentes son un patrón compatible bajo condiciones controladas; aquí sus pendientes no monotónicas y R² bajos no confirman fatiga.
+La variable objetivo es el tercio temporal temprano, medio o tardío de cada grabación. Las métricas por pierna describen esa clasificación temporal y no demuestran fatiga fisiológica ni asimetría neuromuscular. No hay etiquetas independientes de fatiga, fuerza/torque sincronizada, sitio anatómico local confirmado ni calibración física de amplitud; no se define umbral, inicio o pico de fatiga. Esta entrega F31 se limita al análisis local de los 15 grupos y no añade validación externa.
 
 No se añadió una licencia porque los derechos para otorgarla no se verificaron. La reproducción completa requiere acceso autorizado a las grabaciones locales.

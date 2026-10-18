@@ -22,6 +22,7 @@ import pandas as pd
 
 WINDOW_SAMPLES = 1024
 GAP_SCREEN_S = 0.0015
+GAP_FLOAT_TOLERANCE_S = 1e-9
 N_TIME_BINS = 5
 LOW_HZ = 20.0
 HIGH_HZ = 450.0
@@ -67,7 +68,11 @@ def iter_contiguous_windows(
         raise ValueError("timestamps must be strictly increasing")
 
     full_duration = float(times[-1] - times[0])
-    gap_idx = np.flatnonzero(np.diff(times) > gap_screen_s) + 1
+    dt = np.diff(times)
+    positive_dt = dt[dt > 0]
+    adaptive_limit = 1.5 * float(np.median(positive_dt)) if positive_dt.size else 0.0
+    effective_gap_limit = max(float(gap_screen_s), adaptive_limit) + GAP_FLOAT_TOLERANCE_S
+    gap_idx = np.flatnonzero(dt > effective_gap_limit) + 1
     boundaries = np.r_[0, gap_idx, times.size]
     windows: list[dict[str, Any]] = []
 
@@ -85,7 +90,7 @@ def iter_contiguous_windows(
                 end = start + window_samples
                 window_times = times[start:end]
                 dt = np.diff(window_times)
-                if dt.size == 0 or np.any(dt > gap_screen_s):
+                if dt.size == 0 or np.any(dt > effective_gap_limit):
                     continue
                 fs_hz = float(1.0 / np.median(dt))
                 midpoint = float((window_times[0] + window_times[-1]) / 2.0)

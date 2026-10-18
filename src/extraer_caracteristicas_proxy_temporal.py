@@ -20,6 +20,7 @@ from typing import Iterable, Sequence
 
 
 LABEL_ORDER = {"temprana": 0, "transicion": 1, "tardia": 2}
+GAP_FLOAT_TOLERANCE_S = 1e-9
 KEY_FIELDS = ("participant_id", "recording_id", "leg", "set_index")
 PREDICTOR_COLUMNS = (
     "adc_mean",
@@ -81,7 +82,7 @@ def _contiguous_pair_indices(
     pairs: list[tuple[int, int]] = []
     for compact_index, (left, right) in enumerate(zip(indices, indices[1:])):
         delta = float(times[right]) - float(times[left])
-        if right == left + 1 and 0.0 < delta <= max_gap_s:
+        if right == left + 1 and 0.0 < delta <= max_gap_s + GAP_FLOAT_TOLERANCE_S:
             pairs.append((compact_index, compact_index + 1))
     return pairs
 

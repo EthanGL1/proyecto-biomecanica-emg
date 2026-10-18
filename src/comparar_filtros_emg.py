@@ -26,6 +26,7 @@ import numpy as np
 
 
 GAP_THRESHOLD_S = 0.0015
+GAP_FLOAT_TOLERANCE_S = 1e-9
 FILTER_BRANCHES = ("control", "hp20", "hp40", "bp20_400", "fir_bp20_400")
 FILTER_PARAMS = {
     "hp20": {"type": "Butterworth high-pass", "cutoff_hz": 20.0, "prototype_order": 4},
@@ -36,7 +37,7 @@ FILTER_PARAMS = {
 
 
 def split_contiguous_runs(times: np.ndarray, gap_s: float = GAP_THRESHOLD_S) -> list[tuple[int, int]]:
-    """Return half-open sample ranges split at large, duplicate, or reversed times."""
+    """Split runs at gaps greater than the floor/adaptive limit plus 1 ns tolerance."""
     t = np.asarray(times, dtype=float)
     if t.ndim != 1:
         raise ValueError("times must be one-dimensional")
@@ -46,7 +47,11 @@ def split_contiguous_runs(times: np.ndarray, gap_s: float = GAP_THRESHOLD_S) -> 
         raise ValueError("times must be finite")
     if t.size == 0:
         return []
-    breaks = np.flatnonzero((np.diff(t) > gap_s) | (np.diff(t) <= 0)) + 1
+    dt = np.diff(t)
+    positive_dt = dt[dt > 0]
+    adaptive_limit = 1.5 * float(np.median(positive_dt)) if positive_dt.size else 0.0
+    effective_limit = max(float(gap_s), adaptive_limit) + GAP_FLOAT_TOLERANCE_S
+    breaks = np.flatnonzero((dt > effective_limit) | (dt <= 0)) + 1
     edges = np.concatenate(([0], breaks, [t.size]))
     return [(int(a), int(b)) for a, b in zip(edges[:-1], edges[1:])]
 

@@ -8,9 +8,11 @@ El análisis local usó exclusivamente 140 grabaciones EMG correspondientes a 15
 
 No se publican señales, datos por participante, características, etiquetas, particiones, predicciones, resultados por pliegue ni recibos privados. Las mediciones originales y salidas con granularidad individual permanecen en el almacenamiento local restringido. El benchmark completo requiere acceso autorizado a los datos. La comprobación exploratoria externa posterior al congelamiento del modelo no se incluye como datos o figura en esta edición pública.
 
-## Resultados agregados locales
+## Resultados agregados locales (F31)
 
-La selección anidada LOSO comparó 325 configuraciones de 11 familias. Para la clasificación de tres tercios temporales, el selector conjunto obtuvo macro-F1 0,737 (IC 95 %: 0,683–0,786) y ROC-AUC macro OvR 0,939 (0,918–0,958). Logística tuvo el mayor macro-F1 puntual entre selectores por familia (0,753), con intervalos de incertidumbre solapados. Estos valores describen posición temporal; no son métricas de fatiga.
+La selección anidada LOSO comparó 325 configuraciones de 11 familias con 15 pliegues externos por participante y cuatro pliegues internos agrupados. Para los tres tercios temporales, el procedimiento anidado obtuvo macro-F1 medio por participante 0,740 (IC 95 % bootstrap 0,689–0,787) y ROC-AUC macro OvR 0,941 (0,921–0,959). La regresión logística tuvo el mayor punto de macro-F1 entre selectores de familia fija (0,751), pero no se estableció superioridad ni un único modelo universal.
+
+La estratificación post hoc separó las piernas registradas. La izquierda incluyó 14 grupos, 70 grabaciones y 210 segmentos; la derecha, 15 grupos, 68 grabaciones y 204 segmentos. Catorce grupos fueron pareados. Macro-F1 fue 0,776 (IC 95 % 0,675–0,874) a izquierda y 0,686 (0,611–0,762) a derecha; la diferencia pareada izquierda menos derecha fue +0,092 (−0,052 a +0,238), que incluye cero. La cobertura por serie se resume en `reports/LATERALITY_F31_20261018.md` y el heatmap agregado. Estas métricas describen clasificación de posición temporal, no fatiga ni asimetría fisiológica.
 
 En ventanas de 1 s con 50 % de solapamiento, la rama HP20 dio pendientes medianas por grupo de +19,30 cuentas ADC/min para RMS (IC95 % +12,06 a +41,41), −52,49 Hz/min para MDF (−68,38 a −8,54) y −44,03 Hz/min para MNF (−86,01 a −22,17). Las pendientes espectrales mantuvieron dirección descendente al repetir el cálculo sin solapamiento y en las otras ramas. La linealidad fue baja (R² mediano: RMS 0,031; MDF 0,118; MNF 0,083) y las trayectorias no fueron monotónicas. La amplitud se expresa en cuentas ADC, no en mV calibrados.
 
@@ -22,10 +24,10 @@ Para la señal centrada de cada ventana, RMS = sqrt((1/N) sum x_c[n]^2). Se esti
 
 ## Estructura
 
-- `src/`: módulos de QC, filtros, características, benchmark y resguardo de rutas locales.
+- `src/`: 16 módulos de QC, filtros, características, benchmark, análisis por pierna y resguardo de rutas locales.
 - `bibliografia/`: las 44 referencias consolidadas en dos archivos BibTeX, sin cambios.
 - `datasets/README.md`: organización local segura; no incluye datos.
-- `reports/`: informe IEEE público con resultados agregados y figuras locales.
+- `reports/`: informe IEEE público F31, resumen y heatmap agregado por pierna/serie, nota metodológica y auditoría del paquete.
 - `manifest/SHA256SUMS`: hashes del paquete.
 
 ## Reproducibilidad
@@ -37,6 +39,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 python -m compileall -q src
+python -m unittest discover -s tests -v
 python src\entrenar_proxy_temporal.py --help
 ```
 

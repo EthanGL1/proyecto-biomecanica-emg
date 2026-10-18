@@ -2,7 +2,7 @@
 
 ## Alcance
 
-Se analizaron las grabaciones locales de los 15 grupos derivados de códigos de archivo; `participants.csv` no se usó. R1–R5 (138 archivos) sustentan tendencias; R0/R0_1 (2) se conservaron solo para control de calidad. Se mantuvieron juntos los archivos de cada persona. No se modificaron señales originales, etiquetas, particiones ni el benchmark histórico.
+Se analizaron las grabaciones locales de los 15 grupos derivados de códigos de archivo; `participants.csv` no se usó. R1–R5 (138 archivos) sustentan tendencias; R0/R0_1 (2) se conservaron solo para control de calidad. Se mantuvieron juntos los archivos de cada persona. La evaluación F31 por pierna reutilizó las predicciones anidadas congeladas y está resumida en `LATERALITY_F31_20261018.md`; no hubo ajuste de modelo por lado.
 
 ## Filtros y ventanas
 
