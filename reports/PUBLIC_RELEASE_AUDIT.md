@@ -1,7 +1,7 @@
 # Auditoría del paquete público EMG — F31
 
 **Fecha:** 19 de octubre de 2026
-**Estado:** candidato local actualizado; contenido, pruebas, rutas y manifiesto verificados antes de publicación.
+**Estado:** paquete público actualizado y verificado en `main` el 2026-10-19.
 
 ## Contenido y exclusiones
 
@@ -18,7 +18,7 @@ El informe público conserva resultados agregados locales. Se eliminaron las fig
 - PDF exportado desde Word en A4, con 22 páginas renderizadas e inspeccionadas; no se detectaron desbordes ni tablas rotas.
 - Las dos bibliografías se cotejaron con las versiones consolidadas y no se modificaron.
 - La matriz por lado reporta 14 grupos izquierdos y 15 derechos, con 14 pareados; la diferencia Macro-F1 incluye cero.
-- El manifiesto `SHA256SUMS` contiene 33 entradas y sus 33 archivos se verificaron sin discrepancias. La revisión previa de `main` apuntaba a `81fb20131ebe7c9fc35a9859ea23d6a249d6adfc`; el candidato de esta auditoría aún no se había publicado.
+- El manifiesto `SHA256SUMS` contiene 33 entradas y sus 33 archivos se verificaron sin discrepancias. La actualización pública se envió a `main` y se comprobó el head remoto tras el push.
 
 ## Alcance científico
 
