@@ -24,7 +24,7 @@ Para la señal centrada de cada ventana, RMS = sqrt((1/N) sum x_c[n]^2). Se esti
 
 ## Estructura
 
-- `src/`: 16 módulos de QC, filtros, características, benchmark, análisis por pierna y resguardo de rutas locales.
+- `src/`: 17 módulos de QC, filtros, características, benchmark, análisis por pierna y resguardo de rutas locales.
 - `bibliografia/`: las 44 referencias consolidadas en dos archivos BibTeX, sin cambios.
 - `datasets/README.md`: organización local segura; no incluye datos.
 - `reports/`: informe IEEE público F31, resumen y heatmap agregado por pierna/serie, nota metodológica y auditoría del paquete.
@@ -32,7 +32,7 @@ Para la señal centrada de cada ventana, RMS = sqrt((1/N) sum x_c[n]^2). Se esti
 
 ## Reproducibilidad
 
-Se verificaron Python 3.12.14, NumPy 2.3.5 y pandas 3.0.1. El entorno mínimo y comandos de ayuda están en `requirements.txt` y en cada módulo. La inspección de ayuda no lee datos ni lanza entrenamiento. Los argumentos de datos y salida deben apuntar a almacenamiento autorizado fuera de este repositorio.
+Se verificaron Python 3.12.14, NumPy 2.3.5, pandas 3.0.1 y Pillow 12.3.0. El entorno mínimo y comandos de ayuda están en `requirements.txt` y en cada módulo. La inspección de ayuda no lee datos ni lanza entrenamiento. Los argumentos de datos y salida deben apuntar a almacenamiento autorizado fuera de este repositorio.
 
 ```powershell
 python -m venv .venv
@@ -44,6 +44,30 @@ python src\entrenar_proxy_temporal.py --help
 ```
 
 Antes de entrenar, inspecciona el esquema y las marcas temporales, define la etiqueta operacional, verifica el manifiesto de particiones por participante, mantén las salidas privadas fuera del repositorio y no trates el tercio temporal como fatiga o como fallo técnico.
+
+### Ejecución algorítmica independiente con señales sintéticas
+
+`src/reproducir_emg_referencia.py` proporciona un recorrido ejecutable del procesamiento de señal sin grabaciones ni etiquetas del estudio. La demo genera fixtures de software deterministas (multisinusoides con ruido de baja amplitud, no una simulación fisiológica de EMG) para R1–R5, inserta un hueco temporal conocido y guarda sus productos fuera del checkout:
+
+```powershell
+$demoRoot = Join-Path $env:TEMP 'emg-referencia-sintetico'
+python src\reproducir_emg_referencia.py --demo --output-dir $demoRoot --overwrite
+```
+
+También acepta un CSV sintético o autorizado que no contenga columnas de identidad y tenga exactamente tres columnas: `series,time_s,adc_value`. Cada valor de `series` debe ser R1, R2, R3, R4 o R5; cada serie debe aparecer en un único bloque contiguo del archivo. Ejecuta un archivo por grabación. El lector rechaza columnas adicionales para impedir que entren IDs de participante o metadatos no previstos:
+
+```powershell
+$privateOut = Join-Path $env:LOCALAPPDATA 'EMG_Biomecanica\emg_referencia'
+python src\reproducir_emg_referencia.py --input '<AUTHORIZED_CSV_WITHOUT_IDS>' --output-dir $privateOut
+```
+
+Para entradas de señales reales, conserva el CSV y todas las salidas en almacenamiento local autorizado y restringido. La herramienta impide escribir dentro del checkout, pero no detecta carpetas sincronizadas por otros servicios. No publiques los resultados a nivel de ventana o serie.
+
+El flujo estima la frecuencia por la mediana de los intervalos temporales, separa gaps mayores que `max(1,5 ms, 1,5 × mediana del intervalo) + 1 ns` sin interpolar y omite tramos con dispersión temporal p95–p5 superior al 5 %. Requiere frecuencia estimada mayor de 800 Hz para la rama de 20–400 Hz y no remuestrea. Compara señal de control, HP20, HP40 y BP20–400 Butterworth de cuarto orden en fase cero, y BP20–400 FIR Hamming de 101 coeficientes. Una máscara común excluye los bordes de todos los filtros; sobre muestras válidas calcula ventanas Hann de 1 s con 50 % de solapamiento, RMS, MDF y MNF entre 20 y 400 Hz, FFT unilateral, PSD promedio y STFT. El archivo `features.csv` incluye tercios de posición temporal (`temprana`, `transicion`, `tardia`), que son un proxy de tiempo y no clases de fatiga.
+
+La salida contiene `segments.csv` (un resumen por tramo), `mask.csv` (máscara de validez por muestra y rama), `features.csv`, `fft.csv`, `psd.csv`, `stft.csv` y un `summary.json` sin rutas ni hashes de entrada. `--overwrite` permite reemplazar archivos de salida conocidos en una carpeta existente. El flujo no incluye notch, estimación de fuerza, etiquetas fisiológicas, entrenamiento, predicciones, modelo serializado ni figuras individuales. La ejecución sintética hace reproducible el contrato algorítmico, pero **no reproduce las métricas, predicciones ni resultados F31 de la cohorte local**. No se añadieron dependencias: NumPy ya está fijado en `requirements.txt`; el filtro se comparte con el módulo público `src/comparar_filtros_emg.py`.
+
+Este recorrido prueba el comportamiento numérico del software. No verifica que una entrada sea EMG fisiológica, no identifica RAW/RECT/ENV o una calibración física y no selecciona un filtro fisiológicamente ganador.
 
 ## Límites y uso
 
