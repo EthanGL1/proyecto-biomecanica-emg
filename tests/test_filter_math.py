@@ -100,7 +100,7 @@ class FilterMathContractTests(unittest.TestCase):
 
     def test_effect_summary_uses_participant_medians_and_omits_subject_identifiers(self):
         records = []
-        for participant, values in (("P001", [90.0, 80.0, 70.0]), ("P002", [0.0])):
+        for participant, values in (("synthetic_subject_01", [90.0, 80.0, 70.0]), ("synthetic_subject_02", [0.0])):
             for value in values:
                 records.append({
                     "participant_id": participant,
@@ -119,14 +119,14 @@ class FilterMathContractTests(unittest.TestCase):
         self.assertTrue(np.isclose(row["q1_change_pct"], -80.0))
         self.assertTrue(np.isclose(row["q3_change_pct"], -40.0))
         self.assertNotIn("participant_id", row)
-        self.assertNotIn("P001", repr(rows))
-        self.assertNotIn("P002", repr(rows))
+        self.assertNotIn("synthetic_subject_01", repr(rows))
+        self.assertNotIn("synthetic_subject_02", repr(rows))
 
 
     def test_effect_summary_excludes_preliminary_records_from_primary_results(self):
         records = [
             {
-                "participant_id": "P001",
+                "participant_id": "synthetic_subject_01",
                 "record_type": "series_R1_R5",
                 "branches": {
                     "control": {"metrics_common": {"rms_adc": 100.0}},
@@ -134,7 +134,7 @@ class FilterMathContractTests(unittest.TestCase):
                 },
             },
             {
-                "participant_id": "P001",
+                "participant_id": "synthetic_subject_01",
                 "record_type": "preliminary_R0",
                 "branches": {
                     "control": {"metrics_common": {"rms_adc": 100.0}},
@@ -152,10 +152,10 @@ class FilterMathContractTests(unittest.TestCase):
     def test_effect_summary_reports_left_right_and_joint_groups_by_participant(self):
         records = []
         for participant, leg, values in (
-            ("P001", "left", [80.0, 60.0, 100.0]),
-            ("P002", "left", [100.0]),
-            ("P001", "right", [90.0]),
-            ("P003", "right", [70.0]),
+            ("synthetic_subject_01", "left", [80.0, 60.0, 100.0]),
+            ("synthetic_subject_02", "left", [100.0]),
+            ("synthetic_subject_01", "right", [90.0]),
+            ("synthetic_subject_03", "right", [70.0]),
         ):
             for value in values:
                 records.append({
@@ -174,20 +174,20 @@ class FilterMathContractTests(unittest.TestCase):
         self.assertEqual(set(indexed), {"all", "left", "right"})
         self.assertEqual(indexed["left"]["n_participants"], 2)
         self.assertEqual(indexed["left"]["recordings_n"], 4)
-        # P001 contributes its within-person median (-20%), not four pooled rows.
+        # synthetic_subject_01 contributes its within-subject median (-20%), not four pooled rows.
         self.assertTrue(np.isclose(indexed["left"]["median_change_pct"], -10.0))
         self.assertEqual(indexed["right"]["n_participants"], 2)
         self.assertEqual(indexed["right"]["recordings_n"], 2)
         self.assertTrue(np.isclose(indexed["right"]["median_change_pct"], -20.0))
         self.assertEqual(indexed["all"]["n_participants"], 3)
         self.assertEqual(indexed["all"]["recordings_n"], 6)
-        self.assertNotIn("P001", repr(rows))
+        self.assertNotIn("synthetic_subject_01", repr(rows))
 
         paired = summarize_paired_laterality(records, branches=("hp20",), metrics=("rms_adc",))
         self.assertEqual(len(paired), 1)
         self.assertEqual(paired[0]["n_paired_participants"], 1)
         self.assertTrue(np.isclose(paired[0]["median_left_minus_right"], -10.0))
-        self.assertNotIn("P001", repr(paired))
+        self.assertNotIn("synthetic_subject_01", repr(paired))
 
 
 if __name__ == "__main__":

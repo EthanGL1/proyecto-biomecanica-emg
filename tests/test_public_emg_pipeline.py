@@ -150,6 +150,29 @@ class PublicEmgPipelineTests(unittest.TestCase):
             self.assertIn("not a physiological EMG simulator", summary["synthetic_fixture"])
             self.assertIn("no study results are reproduced", summary["data_scope"])
 
+    def test_csv_input_summary_is_not_labeled_as_a_synthetic_fixture(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "caller_input.csv"
+            output_dir = root / "processed"
+            fs_hz = 1000.0
+            times = np.arange(5000) / fs_hz
+            signal = np.sin(2 * np.pi * 90.0 * times)
+            with source.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(("series", "time_s", "adc_value"))
+                writer.writerows(("R1", t, x) for t, x in zip(times, signal))
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["--input", str(source), "--output-dir", str(output_dir)]), 0)
+
+            with (output_dir / "summary.json").open(encoding="utf-8") as handle:
+                summary = json.load(handle)
+            self.assertEqual(summary["input_source"], "csv_input")
+            self.assertNotIn("synthetic_fixture", summary)
+            self.assertIn("caller-supplied CSV", summary["data_scope"])
+            self.assertEqual(summary["runs_processed"], 1)
+
     def test_csv_reader_rejects_identity_columns_and_non_r1_r5_series(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "input.csv"

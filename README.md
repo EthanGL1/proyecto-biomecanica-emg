@@ -4,7 +4,7 @@ Este repositorio contiene código, bibliografía e informe público agregado par
 
 ## Alcance y datos
 
-El análisis local usó exclusivamente 140 grabaciones EMG correspondientes a 15 grupos derivados de los códigos de archivo. Los 138 registros R1–R5 participaron en el benchmark de tercios temporales; R0/R0_1 se conservaron para control de calidad. No se leyó ni usó `participants.csv` ni se emplearon peso, altura u otros metadatos de participantes. Las particiones mantuvieron todas las grabaciones de cada persona en un mismo grupo.
+El análisis de señales EMG, la extracción de características y la evaluación del proxy temporal usaron las 140 grabaciones EMG correspondientes a 15 grupos derivados de los códigos de archivo. Los 138 registros R1–R5 participaron en el benchmark de tercios temporales; R0/R0_1 se conservaron para control de calidad. `participants.csv` se utilizó para reconciliación administrativa del proyecto, pero sus campos no fueron entradas de este análisis ni covariables del modelo; no se emplearon peso, altura u otros metadatos demográficos. Las particiones mantuvieron todas las grabaciones de cada persona en un mismo grupo.
 
 No se publican señales, datos por participante, características, etiquetas, particiones, predicciones, resultados por pliegue ni recibos privados. Las mediciones originales y salidas con granularidad individual permanecen en el almacenamiento local restringido. El benchmark completo requiere acceso autorizado a los datos. La comprobación exploratoria externa posterior al congelamiento del modelo no se incluye como datos o figura en esta edición pública.
 
@@ -58,16 +58,22 @@ También acepta un CSV sintético o autorizado que no contenga columnas de ident
 
 ```powershell
 $privateOut = Join-Path $env:LOCALAPPDATA 'EMG_Biomecanica\emg_referencia'
-python src\reproducir_emg_referencia.py --input '<AUTHORIZED_CSV_WITHOUT_IDS>' --output-dir $privateOut
+python src\reproducir_emg_referencia.py --input '<CSV_WITHOUT_ID_COLUMNS>' --output-dir $privateOut
 ```
 
 Para entradas de señales reales, conserva el CSV y todas las salidas en almacenamiento local autorizado y restringido. La herramienta impide escribir dentro del checkout, pero no detecta carpetas sincronizadas por otros servicios. No publiques los resultados a nivel de ventana o serie.
 
 El flujo estima la frecuencia por la mediana de los intervalos temporales, separa gaps mayores que `max(1,5 ms, 1,5 × mediana del intervalo) + 1 ns` sin interpolar y omite tramos con dispersión temporal p95–p5 superior al 5 %. Requiere frecuencia estimada mayor de 800 Hz para la rama de 20–400 Hz y no remuestrea. Compara señal de control, HP20, HP40 y BP20–400 Butterworth de cuarto orden en fase cero, y BP20–400 FIR Hamming de 101 coeficientes. Una máscara común excluye los bordes de todos los filtros; sobre muestras válidas calcula ventanas Hann de 1 s con 50 % de solapamiento, RMS, MDF y MNF entre 20 y 400 Hz, FFT unilateral, PSD promedio y STFT. El archivo `features.csv` incluye tercios de posición temporal (`temprana`, `transicion`, `tardia`), que son un proxy de tiempo y no clases de fatiga.
 
-La salida contiene `segments.csv` (un resumen por tramo), `mask.csv` (máscara de validez por muestra y rama), `features.csv`, `fft.csv`, `psd.csv`, `stft.csv` y un `summary.json` sin rutas ni hashes de entrada. `--overwrite` permite reemplazar archivos de salida conocidos en una carpeta existente. El flujo no incluye notch, estimación de fuerza, etiquetas fisiológicas, entrenamiento, predicciones, modelo serializado ni figuras individuales. La ejecución sintética hace reproducible el contrato algorítmico, pero **no reproduce las métricas, predicciones ni resultados F31 de la cohorte local**. No se añadieron dependencias: NumPy ya está fijado en `requirements.txt`; el filtro se comparte con el módulo público `src/comparar_filtros_emg.py`.
+La salida contiene `segments.csv` (un resumen por tramo), `mask.csv` (máscara de validez por muestra y rama), `features.csv`, `fft.csv`, `psd.csv`, `stft.csv` y un `summary.json` sin rutas ni hashes de entrada. `input_source` vale `synthetic_demo` para la demo y `csv_input` para cualquier archivo CSV suministrado por quien ejecuta el programa; el CLI no verifica si ese archivo es sintético ni si su uso está autorizado. `--overwrite` permite reemplazar archivos de salida conocidos en una carpeta existente. El flujo no incluye notch, estimación de fuerza, etiquetas fisiológicas, entrenamiento, predicciones, modelo serializado ni figuras individuales. La ejecución sintética hace reproducible el contrato algorítmico, pero **no reproduce las métricas, predicciones ni resultados F31 de la cohorte local**. No se añadieron dependencias: NumPy ya está fijado en `requirements.txt`; el filtro se comparte con el módulo público `src/comparar_filtros_emg.py`.
 
 Este recorrido prueba el comportamiento numérico del software. No verifica que una entrada sea EMG fisiológica, no identifica RAW/RECT/ENV o una calibración física y no selecciona un filtro fisiológicamente ganador.
+
+### Componentes que aún requieren datos o validación autorizados
+
+El repositorio también contiene una pantalla exploratoria de cruces sostenidos de RMS/MDF (`src/analizar_umbral_senal_emg.py`), pero su ejecución completa lee un manifiesto, el recibo de sensibilidad y señales/arrays privados. Sus salidas pueden incluir identificadores, tiempos por registro y figuras individuales; mantenlas en almacenamiento restringido. La pantalla no cuenta repeticiones ni demuestra fatiga o fallo técnico. La tabla de componentes, alcance reproducible y prerrequisitos está en `reports/PUBLIC_RELEASE_AUDIT.md`.
+
+No hay entradas ni evaluación de Borg/RPE en el paquete. Tampoco se publica un checkpoint ni un comando de inferencia listo para uso: el código existente entrena y evalúa el proxy de posición temporal con etiquetas, particiones y trazas privadas. No uses esas clases como etiquetas fisiológicas. Reproducir el benchmark F31 exige los archivos locales autorizados y sus recibos coincidentes; el demo sintético no reproduce sus métricas.
 
 ## Límites y uso
 

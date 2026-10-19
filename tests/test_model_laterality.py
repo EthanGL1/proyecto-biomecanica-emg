@@ -46,11 +46,11 @@ class ModelLateralityTests(unittest.TestCase):
 
     def test_analyzes_every_configuration_and_adds_selected_pipeline_by_leg(self):
         predictions = (
-            _rows("P001", 1, "left", series="R1")
-            + _rows("P001", 1, "right", series="R1", wrong=True)
-            + _rows("P001", 1, "left", series="R2")
-            + _rows("P001", 1, "right", series="R2")
-            + _rows("P002", 2, "right", series="R1")
+            _rows("synthetic_subject_01", 1, "left", series="R1")
+            + _rows("synthetic_subject_01", 1, "right", series="R1", wrong=True)
+            + _rows("synthetic_subject_01", 1, "left", series="R2")
+            + _rows("synthetic_subject_01", 1, "right", series="R2")
+            + _rows("synthetic_subject_02", 2, "right", series="R1")
         )
         selections = [
             {"outer_fold": "1", "selected_configuration_id": "cfg_a"},
@@ -78,8 +78,8 @@ class ModelLateralityTests(unittest.TestCase):
         self.assertEqual(audit["participants_by_leg_series"]["left"]["R2"], 1)
         self.assertEqual(audit["paired_participants_by_series"], {"R1": 1, "R2": 1, "R3": 0, "R4": 0, "R5": 0})
         self.assertEqual(len(confusion), (2 * 2 * 9) + (2 * 2 * 2 * 9))
-        self.assertNotIn("P001", repr(summary))
-        self.assertNotIn("P002", repr(paired))
+        self.assertNotIn("synthetic_subject_01", repr(summary))
+        self.assertNotIn("synthetic_subject_02", repr(paired))
         self.assertNotIn("participant_id", summary[0])
 
     def test_nested_leg_series_heatmap_is_aggregate_and_covers_five_series(self):

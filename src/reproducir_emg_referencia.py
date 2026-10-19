@@ -392,7 +392,6 @@ def analyze_arrays(
 
     result.summary = {
         "algorithm": "generic_emg_reference_v1",
-        "synthetic_fixture": "deterministic multisine plus low-amplitude Gaussian noise; software fixture, not a physiological EMG simulator",
         "series": all_series,
         "series_scope": "R1-R5 temporal series labels only",
         "fatigue_target": "none; elapsed-time thirds are a position proxy only",
@@ -419,7 +418,7 @@ def analyze_arrays(
         "fft_rows": len(result.fft_rows),
         "psd_rows": len(result.psd_rows),
         "stft_rows": len(result.stft_rows),
-        "data_scope": "synthetic fixtures or separately authorized CSV without identity columns; no study results are reproduced",
+        "data_scope": "signal processing only; no cohort-level study results are computed",
     }
     return result
 
@@ -544,9 +543,23 @@ def main(argv: list[str] | None = None) -> int:
         fixture = output_dir / "synthetic_emg.csv"
         write_synthetic_fixture(fixture, overwrite=args.overwrite)
         input_path = fixture
+        input_source = "synthetic_demo"
     else:
         input_path = paths["input"]
+        input_source = "csv_input"
     result = analyze_arrays(read_signal_csv(input_path))
+    result.summary["input_source"] = input_source
+    if args.demo:
+        result.summary["synthetic_fixture"] = (
+            "deterministic multisine plus low-amplitude Gaussian noise; "
+            "software fixture, not a physiological EMG simulator"
+        )
+        result.summary["data_scope"] = "synthetic fixtures only; no study results are reproduced and no cohort data are used"
+    else:
+        result.summary["data_scope"] = (
+            "caller-supplied CSV without identity columns; single-recording processing only; "
+            "no cohort-level study results are computed"
+        )
     write_result(result, output_dir)
     print(json.dumps(result.summary, ensure_ascii=False, indent=2, allow_nan=False))
     return 0
