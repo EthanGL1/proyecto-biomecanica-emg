@@ -1,12 +1,12 @@
-# Análisis EMG — paquete público reproducible F50.5 (actualización intermedia, 20 de octubre de 2026)
+# Análisis EMG — paquete público reproducible F50.6 (actualización intermedia, 20 de octubre de 2026)
 
 Este repositorio reúne código de procesamiento, pruebas, bibliografía y resultados agregados autorizados. El informe DOCX/PDF F31 que permanece en `reports/` es histórico y corresponde a un benchmark de posición temporal; no es el manuscrito F50 para revisión ni una versión final del estudio.
 
-El [estado público F50.5 (intermedio)](reports/F50.5_STATUS_20261020.md) actualiza los agregados F39 v3 y documenta el replay interno de Cerqueira. El [registro F50 previo](reports/F50_STATUS_20261020.md) conserva los hitos anteriores.
+El [estado público F50.6 (intermedio)](reports/F50.6_STATUS_20261020.md) registra la regresión del procesamiento real completo/fragmentado y los límites actuales. El [estado público F50.5](reports/F50.5_STATUS_20261020.md) conserva los agregados F39 v3 y el replay interno de Cerqueira; los registros anteriores permanecen como historia.
 
 El análisis fisiológico principal usa las grabaciones locales de cuádriceps y no confirma fatiga ni pérdida de fuerza. El benchmark Borg es un experimento separado de esfuerzo percibido en EMG de hombro. Cerqueira es una tercera rama para el auto-reporte ordinal de miembro superior: se reprodujo internamente una inferencia de pliegue retenido, pero el diagnóstico temporal/de tarea supera al predictor EMG y no se recomienda un modelo EMG para despliegue.
 
-Este paquete público no contiene señales, HTML con señales embebidas, resultados por participante/ventana, datos de identificación, checkpoints ni inferencias individuales. El modelo Borg congelado no se publica: el SHA está auditado, pero la carga e inferencia reproducibles siguen sin demostrarse en un runtime autorizado.
+Este paquete público no contiene señales, HTML con señales embebidas, resultados por participante/ventana, datos de identificación, checkpoints ni inferencias individuales. La ruta pública descriptiva no carga un clasificador: ahora señala explícitamente la abstención y conserva los productos EMG descriptivos. El modelo Borg congelado no se publica: la carga e inferencia reproducibles siguen bloqueadas por el runtime autorizado.
 
 ## Resultados consolidados F50.5 (intermedio)
 
@@ -76,13 +76,15 @@ python -m unittest discover -s tests -v
 python src\entrenar_proxy_temporal.py --help
 ```
 
-Verificación de la actualización intermedia F50.5 en Windows: 82 pruebas automatizadas, `compileall`, la ayuda CLI y la demo sintética con exportación del visor se ejecutaron correctamente. El adaptador nuevo `--input --series` procesó un único CSV original con esquema crudo. Por separado, el modo `--cohort-fragments` reensambló CSV agrupados por claves explícitas; sus siete tablas y el dashboard coincidieron byte por byte con el procesamiento agrupado completo. Esta comprobación de fragmentos no significa que `--input --series` acepte varios CSV. El recibo y las salidas por señal siguen privados. El procesador de `reproducir_emg_referencia.py` no contiene una ruta de inferencia supervisada y, por diseño, declara que no produce puntuaciones ni niveles de fatiga.
+Verificación F50.6: la suite, `compileall`, la ayuda CLI, la demo sintética y la regresión real/fragmentada se registran en [el estado F50.6](reports/F50.6_STATUS_20261020.md). La ruta descriptiva no carga un modelo y declara abstención estructurada; conserva los resultados de señal y no produce puntuaciones ni niveles de fatiga. El ensayo real y sus recibos permanecen privados.
 
 Antes de entrenar, inspecciona el esquema y las marcas temporales, define la etiqueta operacional, verifica el manifiesto de particiones por participante, mantén las salidas privadas fuera del repositorio y no trates el tercio temporal como fatiga o como fallo técnico.
 
 ### Ejecución algorítmica con señales sintéticas
 
 `src/reproducir_emg_referencia.py` proporciona un recorrido ejecutable del procesamiento de señal sin grabaciones ni etiquetas del estudio. La demo genera fixtures de software deterministas (multisinusoides con ruido de baja amplitud, no una simulación fisiológica de EMG) para R1–R5, inserta un hueco temporal conocido y guarda sus productos fuera del checkout:
+
+Cada `summary.json` exitoso incluye `supervised_inference`: el estado es `abstained` con motivo `no_supervised_model_configured`, `compatibility: not_evaluated` y `prediction_emitted: false`. El procesador completa y conserva los resultados descriptivos; no carga un clasificador ni emite niveles de fatiga. Esto no significa que un modelo haya detectado incompatibilidad: indica explícitamente que esta ruta no realiza inferencia supervisada.
 
 ```powershell
 $demoRoot = Join-Path $env:TEMP 'emg-referencia-sintetico'

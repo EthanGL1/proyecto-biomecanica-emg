@@ -479,6 +479,17 @@ def analyze_arrays(
         "series": all_series,
         "series_scope": "R1-R5 temporal series labels only",
         "fatigue_target": "none; elapsed-time thirds are a position proxy only",
+        "supervised_inference": {
+            "status": "abstained",
+            "reason_code": "no_supervised_model_configured",
+            "compatibility": "not_evaluated",
+            "message": (
+                "This analysis-only command does not load a supervised model. "
+                "No prediction was attempted; use the descriptive EMG outputs without treating them as model scores."
+            ),
+            "prediction_emitted": False,
+            "descriptive_outputs_retained": True,
+        },
         "filter_branches": list(FILTER_BRANCHES),
         "filter_definition": {
             "hp20": "4th-order Butterworth high-pass, forward-backward zero phase",

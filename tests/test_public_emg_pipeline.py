@@ -216,6 +216,12 @@ class PublicEmgPipelineTests(unittest.TestCase):
             self.assertNotIn("synthetic_fixture", summary)
             self.assertIn("caller-supplied CSV", summary["data_scope"])
             self.assertEqual(summary["runs_processed"], 1)
+            supervised = summary["supervised_inference"]
+            self.assertEqual(supervised["status"], "abstained")
+            self.assertEqual(supervised["reason_code"], "no_supervised_model_configured")
+            self.assertEqual(supervised["compatibility"], "not_evaluated")
+            self.assertFalse(supervised["prediction_emitted"])
+            self.assertTrue(supervised["descriptive_outputs_retained"])
 
     def test_csv_reader_rejects_identity_columns_and_non_r1_r5_series(self):
         with tempfile.TemporaryDirectory() as temporary:
