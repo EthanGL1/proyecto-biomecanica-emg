@@ -19,7 +19,7 @@ from typing import Iterable
 
 import numpy as np
 
-from release_paths import validate_data_paths
+from release_paths import resolve_recorded_npz_path, validate_data_paths
 from PIL import Image, ImageDraw, ImageFont
 
 from comparar_filtros_emg import (
@@ -747,11 +747,25 @@ def make_recording_figure(npz_path: Path, fs_hz: float, stem: Path) -> None:
     canvas.save(stem)
 
 
-def run_audit(receipt_path: Path, output_dir: Path, case_sha256: str | None = None) -> dict:
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def run_audit(
+    receipt_path: Path,
+    output_dir: Path,
+    case_sha256: str | None = None,
+    private_root: Path | None = None,
+) -> dict:
     receipt_path = Path(receipt_path)
     output_dir = Path(output_dir)
+    private_root = Path(private_root) if private_root is not None else receipt_path.parent
     validate_data_paths(
-        {"receipt": receipt_path, "output_dir": output_dir},
+        {"receipt": receipt_path, "output_dir": output_dir, "private_root": private_root},
         Path(__file__).resolve().parents[1],
     )
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -759,7 +773,21 @@ def run_audit(receipt_path: Path, output_dir: Path, case_sha256: str | None = No
         raise ValueError("filter receipt does not match the audited local corpus")
     if receipt.get("signal_column") != "ADC_Value" or receipt.get("channel_mode") != "unknown_RAW_RECT_ENV":
         raise ValueError("receipt signal metadata differs from the audited channel")
-    records = receipt["records_private"]
+    records = []
+    for item in receipt["records_private"]:
+        record = dict(item)
+        archive_path = resolve_recorded_npz_path(
+            private_root,
+            record.get("output_path", ""),
+            field_name="output_path",
+        )
+        expected_sha256 = record.get("output_sha256")
+        if not isinstance(expected_sha256, str) or len(expected_sha256) != 64:
+            raise ValueError("filter receipt output_sha256 is missing or malformed")
+        if _sha256_file(archive_path) != expected_sha256.lower():
+            raise ValueError("filter receipt output_sha256 does not match its contained NPZ archive")
+        record["output_path"] = str(archive_path)
+        records.append(record)
     fs_values = [float(record["fs_estimated_median_hz"]) for record in records if record.get("fs_estimated_median_hz")]
     if not fs_values:
         raise ValueError("no timestamp-derived sample-rate values in receipt")
@@ -837,9 +865,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--receipt", type=Path, default=local / "EMG_Biomecanica/datasets/filter_sensitivity_v1/receipt_filter_sensitivity_v1.json")
     parser.add_argument("--output-dir", type=Path, default=local / "EMG_Biomecanica/reports/filter_math_audit")
+    parser.add_argument("--private-root", type=Path, help="Trusted root containing the receipt's filtered NPZ arrays; defaults to the receipt directory")
     parser.add_argument("--case-sha256", help="Optional private archive hash for a previously selected R1-R5 case")
     args = parser.parse_args()
-    print(json.dumps(run_audit(args.receipt, args.output_dir, args.case_sha256), indent=2))
+    print(json.dumps(run_audit(args.receipt, args.output_dir, args.case_sha256, args.private_root), indent=2))
 
 
 if __name__ == "__main__":

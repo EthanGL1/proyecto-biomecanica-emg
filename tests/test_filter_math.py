@@ -1,4 +1,6 @@
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -27,6 +29,75 @@ class FilterMathContractTests(unittest.TestCase):
     def test_filter_audit_refuses_receipts_or_outputs_inside_checkout(self):
         with self.assertRaises(ReleasePathError):
             run_audit(ROOT / "README.md", ROOT / "reports" / "forbidden")
+
+    def test_filter_audit_rejects_receipt_array_path_outside_private_root(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            private_root = base / "arrays"
+            private_root.mkdir()
+            outside = base / "outside.npz"
+            outside.write_bytes(b"not opened")
+            receipt_path = private_root / "receipt.json"
+            receipt_path.write_text(
+                json.dumps(
+                    {
+                        "analysis": "filter_sensitivity_v1",
+                        "records": 140,
+                        "participants": 15,
+                        "signal_column": "ADC_Value",
+                        "channel_mode": "unknown_RAW_RECT_ENV",
+                        "records_private": [
+                            {
+                                "output_path": str(outside),
+                                "fs_estimated_median_hz": 1000.0,
+                                "record_type": "series_R1_R5",
+                                "n_samples": 100,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output_dir = base / "report"
+            with self.assertRaisesRegex(ReleasePathError, "output_path"):
+                run_audit(receipt_path, output_dir)
+            self.assertFalse(output_dir.exists())
+
+    def test_filter_audit_checks_contained_archive_hash_before_creating_outputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            private_root = base / "arrays"
+            private_root.mkdir()
+            archive = private_root / "P01_R1_left.npz"
+            archive.write_bytes(b"present but not the receipted archive")
+            receipt_path = private_root / "receipt.json"
+            receipt_path.write_text(
+                json.dumps(
+                    {
+                        "analysis": "filter_sensitivity_v1",
+                        "records": 140,
+                        "participants": 15,
+                        "signal_column": "ADC_Value",
+                        "channel_mode": "unknown_RAW_RECT_ENV",
+                        "records_private": [
+                            {
+                                "output_path": str(archive),
+                                "output_sha256": "0" * 64,
+                                "participant_id": "P01",
+                                "leg": "left",
+                                "fs_estimated_median_hz": 1000.0,
+                                "record_type": "series_R1_R5",
+                                "n_samples": 100,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output_dir = base / "report"
+            with self.assertRaisesRegex(ValueError, "output_sha256"):
+                run_audit(receipt_path, output_dir)
+            self.assertFalse(output_dir.exists())
 
     def test_raster_canvas_rotates_vertical_axis_labels(self):
         canvas = _Canvas(300, 300)

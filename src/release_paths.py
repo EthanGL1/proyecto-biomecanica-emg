@@ -91,6 +91,76 @@ def resolve_under_root(
     return candidate
 
 
+def resolve_recorded_path(
+    root: Path,
+    recorded_path: str | Path,
+    *,
+    field_name: str = "recorded path",
+    must_exist: bool = True,
+) -> Path:
+    """Resolve a path recorded in a receipt while confining it to ``root``.
+
+    Existing receipts store absolute output paths, while portable examples may
+    use relative paths. Both forms are accepted only when their resolved file
+    is a strict descendant of the explicitly configured root. Symlinks are
+    resolved before the containment check.
+    """
+    try:
+        raw_path = Path(recorded_path)
+        raw_text = str(recorded_path)
+        windows_path = PureWindowsPath(raw_text)
+        resolved_root = Path(root).resolve(strict=True)
+    except (TypeError, ValueError, OSError, RuntimeError) as error:
+        raise ReleasePathError(f"{field_name} cannot be safely resolved beneath its root") from error
+    if not raw_text or "\x00" in raw_text:
+        raise ReleasePathError(f"{field_name} must name a file beneath its root")
+    if not resolved_root.is_dir():
+        raise ReleasePathError(f"{field_name} root must be an existing directory")
+
+    if raw_path.is_absolute() or windows_path.is_absolute():
+        try:
+            candidate = raw_path.resolve(strict=False)
+        except (OSError, RuntimeError, ValueError) as error:
+            raise ReleasePathError(f"{field_name} cannot be safely resolved beneath its root") from error
+        try:
+            relative = candidate.relative_to(resolved_root)
+        except ValueError as error:
+            raise ReleasePathError(f"{field_name} escapes its configured root") from error
+        if not relative.parts:
+            raise ReleasePathError(f"{field_name} must name a file below its configured root")
+        if must_exist and not candidate.exists():
+            raise FileNotFoundError(f"{field_name} does not exist beneath its configured root")
+        return candidate
+
+    if windows_path.drive:
+        raise ReleasePathError(f"{field_name} must be a relative path beneath its root")
+    return resolve_under_root(
+        resolved_root,
+        raw_text,
+        field_name=field_name,
+        must_exist=must_exist,
+    )
+
+
+def resolve_recorded_npz_path(
+    root: Path,
+    recorded_path: str | Path,
+    *,
+    field_name: str = "recorded output_path",
+) -> Path:
+    """Resolve a receipt archive as an existing direct-child NPZ under root."""
+    resolved_root = Path(root).resolve(strict=True)
+    candidate = resolve_recorded_path(
+        resolved_root,
+        recorded_path,
+        field_name=field_name,
+        must_exist=True,
+    )
+    if candidate.parent != resolved_root or candidate.suffix.lower() != ".npz" or not candidate.is_file():
+        raise ReleasePathError(f"{field_name} must name a direct-child NPZ archive beneath its root")
+    return candidate
+
+
 def validate_data_paths(
     values: Mapping[str, object], checkout_root: Path, cwd: Path | None = None
 ) -> dict[str, Path]:

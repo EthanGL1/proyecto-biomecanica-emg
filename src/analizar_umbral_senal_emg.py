@@ -7,7 +7,7 @@ Original input CSVs and the historical filter benchmark are read-only.
 
 from __future__ import annotations
 
-from release_paths import validate_data_paths
+from release_paths import resolve_recorded_npz_path, validate_data_paths
 
 import argparse
 import csv
@@ -735,6 +735,18 @@ def analyze_dataset(private_root: Path, output_root: Path, public_root: Path) ->
     if set(manifest_keys) != set(receipt_by_key):
         raise ValueError("manifest and filter receipt composite keys differ")
 
+    npz_by_key: dict[tuple[str, str, str], Path] = {}
+    for filt in receipt_rows:
+        key = (filt["participant_id"], filt["recording_id"], filt["leg"])
+        npz_path = resolve_recorded_npz_path(
+            private_root,
+            filt.get("output_path", ""),
+            field_name="output_path",
+        )
+        if _sha256(npz_path) != filt.get("output_sha256"):
+            raise ValueError("verified filtered array archive is missing or changed")
+        npz_by_key[key] = npz_path
+
     output_root.mkdir(parents=True, exist_ok=True)
     figures_root = output_root / "figures_private"
     figures_root.mkdir(parents=True, exist_ok=True)
@@ -754,9 +766,7 @@ def analyze_dataset(private_root: Path, output_root: Path, public_root: Path) ->
         if _sha256(source_path) != manifest_row["sha256_uncompressed"]:
             raise ValueError("pseudonymized input hash changed since filter analysis")
         filt = receipt_by_key[key]
-        npz_path = Path(filt["output_path"])
-        if not npz_path.is_file() or _sha256(npz_path) != filt["output_sha256"]:
-            raise ValueError("verified filtered array archive is missing or changed")
+        npz_path = npz_by_key[key]
         times_csv, raw_csv = _read_signal_csv(source_path)
         with np.load(npz_path, allow_pickle=False) as arrays:
             times = arrays["times_s"].astype(np.float64, copy=False)

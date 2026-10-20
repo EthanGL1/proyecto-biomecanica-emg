@@ -9,11 +9,85 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 import release_paths
-from release_paths import ReleasePathError
+from release_paths import ReleasePathError, resolve_recorded_npz_path, resolve_recorded_path
 import generar_proxy_temporal
 
 
 class ReleasePathContainmentTests(unittest.TestCase):
+    def test_recorded_absolute_and_relative_paths_resolve_only_beneath_root(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "arrays"
+            root.mkdir()
+            target = root / "P01_R1_left.npz"
+            target.write_bytes(b"safe")
+
+            self.assertEqual(
+                resolve_recorded_path(root, target, field_name="receipt output"),
+                target.resolve(),
+            )
+            self.assertEqual(
+                resolve_recorded_path(root, "P01_R1_left.npz", field_name="receipt output"),
+                target.resolve(),
+            )
+
+    def test_recorded_paths_reject_outside_absolute_and_symlink_targets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "arrays"
+            outside_dir = base / "outside"
+            outside = outside_dir / "outside.npz"
+            root.mkdir()
+            outside_dir.mkdir()
+            outside.write_bytes(b"outside")
+
+            with self.assertRaisesRegex(ReleasePathError, "receipt output"):
+                resolve_recorded_path(root, outside, field_name="receipt output")
+
+            link = root / "outside_link"
+            try:
+                link.symlink_to(outside_dir, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                if os.name != "nt":
+                    self.skipTest("symlink creation is unavailable in this environment")
+                quote = lambda path: "'" + str(path).replace("'", "''") + "'"
+                command = (
+                    "New-Item -ItemType Junction -Path "
+                    + quote(link)
+                    + " -Target "
+                    + quote(outside_dir)
+                    + " | Out-Null"
+                )
+                result = subprocess.run(
+                    ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    self.skipTest(f"symlink or junction creation is unavailable: {result.stderr.strip()}")
+            with self.assertRaisesRegex(ReleasePathError, "receipt output"):
+                resolve_recorded_npz_path(root, link / outside.name, field_name="receipt output")
+
+    def test_recorded_archive_must_be_direct_child_npz(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "arrays"
+            root.mkdir()
+            valid = root / "P01_R1_left.npz"
+            valid.write_bytes(b"safe")
+            nested_dir = root / "nested"
+            nested_dir.mkdir()
+            nested = nested_dir / "nested.npz"
+            nested.write_bytes(b"safe")
+            wrong_suffix = root / "not_an_archive.csv"
+            wrong_suffix.write_bytes(b"data")
+
+            self.assertEqual(resolve_recorded_npz_path(root, valid), valid.resolve())
+            with self.assertRaisesRegex(ReleasePathError, "direct-child NPZ"):
+                resolve_recorded_npz_path(root, nested)
+            with self.assertRaisesRegex(ReleasePathError, "direct-child NPZ"):
+                resolve_recorded_npz_path(root, wrong_suffix)
+
     def _resolve_under_root(self):
         resolver = getattr(release_paths, "resolve_under_root", None)
         self.assertTrue(callable(resolver), "release_paths.resolve_under_root must enforce derived-path containment")
