@@ -4,7 +4,7 @@
 
 ## Alcance y privacidad
 
-La auditoría remota anterior no encontró señales EMG, `participants.csv`, salidas por sujeto, predicciones privadas, etiquetas/fenotipos individuales, datos Cerqueira ni checkpoints restringidos. Ese snapshot histórico tenía 39 archivos de carga útil. El paquete de código publicado incluye 47 archivos de carga útil; los 47 hashes del manifiesto coinciden con los blobs del commit `1937a53f5bd780b9592ae216ed2b3a0f5888743b`. La inspección del cambio publicado confirma que solo agrega código, pruebas sintéticas y documentación; no se incluyen datos ni checkpoints.
+La auditoría remota anterior no encontró señales EMG, `participants.csv`, salidas por sujeto, predicciones privadas, etiquetas/fenotipos individuales, datos Cerqueira ni checkpoints restringidos. Ese snapshot histórico tenía 39 archivos de carga útil. El paquete de código publicado incluye 47 archivos de carga útil; en el árbol versionado de esta auditoría, los 47 hashes del manifiesto coinciden con los blobs de sus respectivos archivos. La inspección del cambio publicado confirma que solo agrega código, pruebas sintéticas y documentación; no se incluyen datos ni checkpoints.
 
 ## Comprobaciones reproducibles
 
