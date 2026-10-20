@@ -22,6 +22,12 @@ The public processing code was tested on a clean clone of the remote `main` base
 
 The repo's previous restricted F44 audit also records one real-recording smoke run outside the public checkout. No raw data or that recording's identity/hash is copied into this status file.
 
+### Public-code hardening and current verification (F48.1)
+
+The public `main` branch now includes receipt-path containment and archive-hash preflight checks. Receipt paths must resolve inside the configured private root, recorded NPZ inputs must be direct children of that root, and all referenced archives are checked before output directories are created. Regression coverage includes outside-root paths, a Windows junction escape, a corrupt archive hash, and failure before output creation.
+
+The complete public test suite passed on the code at commit `87b744256c3a4e7f49de018f1a3923812b576289` (`53 tests`, zero failures). This F48.1 report update is documentation-only; it does not change executable code. The committed checksum manifest contains 39 payload entries; all 39 Git-blob SHA-256 values were recomputed and matched. These checks verify repository integrity and software behavior, not a fatigue model or physiological validity.
+
 ## Release limits
 
 - The public processing CLI exports signal features, spectra, masks, STFT, candidate activity and a descriptive Gantt/viewer; it does not produce fatigue predictions or Borg scores.
