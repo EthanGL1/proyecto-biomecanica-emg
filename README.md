@@ -45,6 +45,7 @@ Para la señal centrada de cada ventana, RMS = sqrt((1/N) sum x_c[n]^2). Se esti
 ## Estructura
 
 - `src/`: 18 módulos de QC, filtros, características, benchmark, análisis por pierna y resguardo de rutas locales.
+- `src/cerqueira/`: cinco módulos separados para auditoría de alineación, extracción, LOSO e inferencia del objetivo de auto-reporte ordinal de miembro superior; sus productos deben mantenerse privados.
 - `bibliografia/`: las 44 referencias consolidadas en dos archivos BibTeX, sin cambios.
 - `datasets/README.md`: organización local segura; no incluye datos.
 - `reports/`: informe IEEE público F31, resumen y heatmap agregado por pierna/serie, nota metodológica y auditoría del paquete.
@@ -57,6 +58,8 @@ El manifiesto contiene los SHA-256 de los bytes versionados de cada archivo rast
 Se verificaron Python 3.12.14, NumPy 2.3.5, pandas 3.0.1 y Pillow 12.3.0. El entorno mínimo y comandos de ayuda están en `requirements.txt` y en cada módulo. La inspección de ayuda no lee datos ni lanza entrenamiento. Los argumentos de datos y salida deben apuntar a almacenamiento autorizado fuera de este repositorio.
 
 Los nombres de archivo derivados de manifiestos y tablas de etiquetas se validan como componentes individuales y las rutas se resuelven dentro de su raíz configurada, incluidas las comprobaciones de enlaces simbólicos. Los analizadores también confinan cada `output_path` del recibo a un archivo NPZ directo de la carpeta privada, comprueban su SHA-256 y validan el conjunto completo antes de crear productos. En las seis tablas CSV del modo agrupado, los identificadores con prefijo de fórmula se neutralizan solo al exportar; las claves originales se conservan durante el procesamiento.
+
+El auditor Cerqueira también neutraliza en el CSV los textos con prefijo de fórmula procedentes de nombres de miembros ZIP; el recibo JSON conserva la ruta original para trazabilidad. El paquete sigue siendo intermedio y la auditoría formal de Codex Security no se ha cerrado.
 
 ```powershell
 python -m venv .venv
@@ -129,6 +132,12 @@ El flujo estima la frecuencia por la mediana de los intervalos temporales, separ
 La salida contiene `segments.csv` (un resumen por tramo), `mask.csv` (máscara de validez por muestra y rama), `features.csv`, `fft.csv`, `psd.csv`, `stft.csv`, `activity_candidates.csv` (vacío salvo cuando se solicita el tablero) y un `summary.json` sin rutas ni hashes de entrada. El modo agrupado añade los tres CSV agregados descritos arriba. Con `--dashboard` también se genera `dashboard.html` para una grabación sin identidad o para un único grupo seleccionado. El Gantt distingue actividad candidata por envolvente RMS de muestras no evaluables por la máscara de procesamiento; no clasifica calidad fisiológica, movimiento o saturación. `input_source` identifica `synthetic_demo`, `csv_input`, `cohort_csv` o `cohort_fragments` según la entrada; el CLI no verifica si ese archivo es sintético ni si su uso está autorizado. `--overwrite` permite reemplazar archivos de salida conocidos en una carpeta existente y elimina tablas agregadas de una ejecución de cohorte anterior cuando la nueva entrada no es agrupada, además de retirar un tablero anterior si no se solicita uno; así evita dejar productos opcionales obsoletos junto a la nueva salida. Las métricas numéricas vacías o no finitas pueden quedar ausentes por métrica, pero cualquier texto no vacío que no sea numérico detiene el resumen para no alterar silenciosamente sus denominadores. El flujo no incluye notch, estimación de fuerza, etiquetas fisiológicas, entrenamiento, predicciones, modelo serializado ni puntuaciones de fatiga. La ejecución sintética hace reproducible el contrato algorítmico, pero **no reproduce las métricas, predicciones ni resultados F31 de la cohorte local**. No se añadieron dependencias: NumPy ya está fijado en `requirements.txt`; el filtro se comparte con el módulo público `src/comparar_filtros_emg.py`.
 
 Este recorrido prueba el comportamiento numérico del software. No verifica que una entrada sea EMG fisiológica, no identifica RAW/RECT/ENV o una calibración física y no selecciona un filtro fisiológicamente ganador.
+
+### Código reproducible Cerqueira (fatiga autopercibida de miembro superior)
+
+El paquete ahora incluye el código de auditoría de alineación EMG-etiquetas, extracción de características, evaluación anidada LOSO por participante e inferencia de ensayos/fragmentos compatibles en [`src/cerqueira/`](src/cerqueira/README.md). Sus entradas y salidas granulares contienen información por participante, ensayo o ventana: mantenlas en almacenamiento restringido fuera del checkout y no las publiques. Los tests incluidos usan datos sintéticos.
+
+La inferencia pública solo carga modelos de pliegue que están registrados en el manifiesto de evaluación y no consume etiquetas. No hay un modelo de despliegue publicado. Los resultados actuales muestran que el baseline temporal supera al EMG; el código es para reproducibilidad metodológica y no para afirmar detección de fatiga funcional, fatiga del cuádriceps ni una predicción clínica.
 
 ### Componentes que aún requieren datos o validación autorizados
 
