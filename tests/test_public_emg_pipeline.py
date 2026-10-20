@@ -2,6 +2,7 @@ import csv
 import contextlib
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -14,8 +15,11 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from reproducir_emg_referencia import (  # noqa: E402
     analyze_arrays,
+    analyze_cohort_arrays,
     main,
     periodogram,
+    read_cohort_signal_csv,
+    read_cohort_signal_fragments,
     read_signal_csv,
     split_contiguous_runs,
     write_synthetic_fixture,
@@ -23,6 +27,21 @@ from reproducir_emg_referencia import (  # noqa: E402
 
 
 class PublicEmgPipelineTests(unittest.TestCase):
+    def _write_cohort_csv(self, path: Path, groups, *, sample_count: int = 2000) -> Path:
+        """Write a test-only cohort fixture with synthetic identifiers and signals."""
+        fs_hz = 1000.0
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(("subject_id", "side", "series", "time_s", "adc_value"))
+            for group_index, (subject_id, side, series) in enumerate(groups):
+                times = np.arange(sample_count, dtype=float) / fs_hz
+                signal = np.sin(2.0 * np.pi * (70.0 + group_index) * times)
+                writer.writerows(
+                    (subject_id, side, series, f"{time_s:.9f}", f"{value:.12f}")
+                    for time_s, value in zip(times, signal)
+                )
+        return path
+
     def test_gap_segmentation_splits_without_inserting_samples(self):
         times = np.asarray([0.000, 0.001, 0.002, 0.003, 0.004, 0.010, 0.011, 0.012])
 
@@ -183,6 +202,196 @@ class PublicEmgPipelineTests(unittest.TestCase):
             source.write_text("series,time_s,adc_value\nR0,0,1\n", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "R1-R5"):
                 read_signal_csv(source)
+
+    def test_cohort_reader_accepts_explicit_subject_side_series_groups(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "cohort.csv"
+            groups = [("synthetic_subject_01", side, series)
+                      for side in ("left", "right")
+                      for series in ("R1", "R2", "R3", "R4", "R5")]
+            self._write_cohort_csv(source, groups, sample_count=3)
+
+            recordings = read_cohort_signal_csv(source)
+
+        self.assertEqual(set(recordings), set(groups))
+        self.assertTrue(all(times.size == values.size == 3 for times, values in recordings.values()))
+
+    def test_cohort_reader_accepts_required_columns_in_any_order(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "reordered_cohort.csv"
+            source.write_text(
+                "adc_value,series,side,time_s,subject_id\n"
+                "1.0,R1,left,0.000,synthetic_subject_01\n"
+                "2.0,R1,left,0.001,synthetic_subject_01\n"
+                "3.0,R1,left,0.002,synthetic_subject_01\n",
+                encoding="utf-8",
+            )
+
+            recordings = read_cohort_signal_csv(source)
+
+        self.assertEqual(set(recordings), {("synthetic_subject_01", "left", "R1")})
+        times, values = recordings[("synthetic_subject_01", "left", "R1")]
+        self.assertEqual(times.tolist(), [0.0, 0.001, 0.002])
+        self.assertEqual(values.tolist(), [1.0, 2.0, 3.0])
+
+    def test_cohort_reader_rejects_missing_or_conflicting_group_fields_and_bad_times(self):
+        invalid_csvs = (
+            ("subject_id,side,series,time_s,adc_value\n,left,R1,0,1\n", "subject_id"),
+            ("subject_id,side,series,time_s,adc_value\nsynthetic_subject_01,LEFT,R1,0,1\n", "side"),
+            ("subject_id,side,series,time_s,adc_value\nsynthetic_subject_01,left,R0,0,1\n", "series"),
+            ("subject_id,side,series,time_s,adc_value\nsynthetic_subject_01,left,R1,0,1\nsynthetic_subject_01,left,R1,0,2\n", "duplicate sample"),
+            ("subject_id,side,series,time_s,adc_value\nsynthetic_subject_01,left,R1,0,1\nsynthetic_subject_01,left,R1,0.1,2\nsynthetic_subject_01,left,R1,0.05,3\n", "reset"),
+            ("subject_id,side,series,time_s,adc_value\nsynthetic_subject_01,left,R1,0,1\nsynthetic_subject_01,left,R2,0,2\nsynthetic_subject_01,left,R1,1,3\n", "block"),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "invalid.csv"
+            source.write_text("side,series,time_s,adc_value\nleft,R1,0,1\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "columns"):
+                read_cohort_signal_csv(source)
+            for contents, expected in invalid_csvs:
+                with self.subTest(expected=expected):
+                    source.write_text(contents, encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, expected):
+                        read_cohort_signal_csv(source)
+
+    def test_cohort_analysis_rejects_groups_without_a_complete_valid_window(self):
+        times = np.arange(1000, dtype=float) / 1000.0
+        signal = np.sin(2.0 * np.pi * 80.0 * times)
+        recordings = {("synthetic_subject_01", "left", "R1"): (times, signal)}
+
+        with self.assertRaisesRegex(ValueError, "too short"):
+            analyze_cohort_arrays(recordings)
+
+    def test_cohort_cli_smoke_processes_synthetic_15_subject_fixture_without_comparisons(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "synthetic_15_subject_cohort.csv"
+            output_dir = root / "cohort_output"
+            groups = [(f"synthetic_subject_{index:02d}", "left" if index % 2 else "right", f"R{(index % 5) + 1}")
+                      for index in range(1, 16)]
+            self._write_cohort_csv(source, groups)
+
+            completed = subprocess.run(
+                [sys.executable, str(ROOT / "src" / "reproducir_emg_referencia.py"),
+                 "--cohort-input", str(source), "--output-dir", str(output_dir)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["subject_count"], 15)
+            self.assertEqual(summary["recording_group_count"], 15)
+            self.assertFalse(summary["cohort_comparisons_computed"])
+            self.assertEqual(summary["fatigue_target"], "none; elapsed-time thirds are a position proxy only")
+            rows = []
+            for filename in ("segments.csv", "mask.csv", "features.csv", "fft.csv", "psd.csv", "stft.csv"):
+                with (output_dir / filename).open(newline="", encoding="utf-8") as handle:
+                    reader = csv.DictReader(handle)
+                    self.assertTrue({"subject_id", "side", "series"}.issubset(reader.fieldnames or []))
+                    file_rows = list(reader)
+                    self.assertTrue(file_rows, filename)
+                    self.assertEqual({row["subject_id"] for row in file_rows}, {group[0] for group in groups})
+                    self.assertEqual({row["side"] for row in file_rows}, {"left", "right"})
+                    if filename == "features.csv":
+                        rows = file_rows
+            self.assertEqual({row["subject_id"] for row in rows}, {group[0] for group in groups})
+            self.assertEqual({row["side"] for row in rows}, {"left", "right"})
+            self.assertTrue(all(row["series"].startswith("R") for row in rows))
+
+    def test_fragment_reader_reassembles_chronologically_and_preserves_gaps(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = root / "first.csv"
+            second = root / "second.csv"
+            first.write_text(
+                "subject_id,side,series,time_s,adc_value\n"
+                "synthetic_subject_01,left,R1,0.000,1\n"
+                "synthetic_subject_01,left,R1,0.001,2\n",
+                encoding="utf-8",
+            )
+            second.write_text(
+                "subject_id,side,series,time_s,adc_value\n"
+                "synthetic_subject_01,left,R1,0.010,3\n"
+                "synthetic_subject_01,left,R1,0.011,4\n",
+                encoding="utf-8",
+            )
+
+            merged = read_cohort_signal_fragments([second, first])
+
+        times, values = merged[("synthetic_subject_01", "left", "R1")]
+        self.assertEqual(times.tolist(), [0.0, 0.001, 0.01, 0.011])
+        self.assertEqual(values.tolist(), [1.0, 2.0, 3.0, 4.0])
+        self.assertEqual(split_contiguous_runs(times), [(0, 2), (2, 4)])
+
+    def test_fragment_reader_rejects_overlapping_or_duplicate_samples(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = root / "first.csv"
+            second = root / "overlap.csv"
+            first.write_text(
+                "subject_id,side,series,time_s,adc_value\n"
+                "synthetic_subject_01,left,R1,0.000,1\n"
+                "synthetic_subject_01,left,R1,0.001,2\n",
+                encoding="utf-8",
+            )
+            second.write_text(
+                "subject_id,side,series,time_s,adc_value\n"
+                "synthetic_subject_01,left,R1,0.001,2\n"
+                "synthetic_subject_01,left,R1,0.002,3\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "overlap or duplicate timestamp"):
+                read_cohort_signal_fragments([first, second])
+
+    def test_cli_fragment_reassembly_matches_whole_recording_outputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            full = root / "full.csv"
+            first = root / "part_01.csv"
+            second = root / "part_02.csv"
+            fs_hz = 1000.0
+            times = np.arange(6000, dtype=float) / fs_hz
+            signal = np.sin(2.0 * np.pi * 83.0 * times) + 0.1 * np.sin(2.0 * np.pi * 7.0 * times)
+
+            def write_rows(path, start, stop):
+                with path.open("w", newline="", encoding="utf-8") as handle:
+                    writer = csv.writer(handle)
+                    writer.writerow(("subject_id", "side", "series", "time_s", "adc_value"))
+                    writer.writerows(
+                        ("synthetic_subject_01", "left", "R1", f"{times[i]:.9f}", f"{signal[i]:.12f}")
+                        for i in range(start, stop)
+                    )
+
+            write_rows(full, 0, len(times))
+            write_rows(first, 0, 3000)
+            write_rows(second, 3000, len(times))
+            full_output = root / "whole_output"
+            fragment_output = root / "fragment_output"
+
+            full_run = subprocess.run(
+                [sys.executable, str(ROOT / "src" / "reproducir_emg_referencia.py"),
+                 "--cohort-input", str(full), "--output-dir", str(full_output)],
+                cwd=ROOT, check=False, capture_output=True, text=True,
+            )
+            fragment_run = subprocess.run(
+                [sys.executable, str(ROOT / "src" / "reproducir_emg_referencia.py"),
+                 "--cohort-fragments", str(second), str(first), "--output-dir", str(fragment_output)],
+                cwd=ROOT, check=False, capture_output=True, text=True,
+            )
+
+            self.assertEqual(full_run.returncode, 0, full_run.stderr)
+            self.assertEqual(fragment_run.returncode, 0, fragment_run.stderr)
+            for filename in ("segments.csv", "mask.csv", "features.csv", "fft.csv", "psd.csv", "stft.csv"):
+                self.assertEqual((fragment_output / filename).read_bytes(), (full_output / filename).read_bytes(), filename)
+            summary = json.loads((fragment_output / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["input_source"], "cohort_fragments")
+            self.assertEqual(summary["fragment_file_count"], 2)
+            self.assertEqual(summary["sample_count"], 6000)
+            self.assertEqual(summary["runs_processed"], 1)
 
     def test_cli_refuses_output_inside_public_checkout(self):
         with self.assertRaisesRegex(ValueError, "outside the public source checkout"):

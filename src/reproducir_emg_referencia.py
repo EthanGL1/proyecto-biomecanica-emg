@@ -1,8 +1,9 @@
-"""Run the public, data-agnostic EMG processing reference on CSV fixtures.
+"""Run public, data-agnostic EMG signal processing on supplied CSV recordings.
 
-This command implements signal processing only. It creates no participant
-labels, fatigue model, predictions, or individual figures. Input and output
-paths must remain outside the public source checkout.
+The demo mode uses deterministic software fixtures. The command implements
+signal processing only; it creates no participant labels, fatigue model,
+predictions, or individual figures. Input and output paths must remain outside
+the public source checkout.
 """
 
 from __future__ import annotations
@@ -43,6 +44,9 @@ FIXTURE_GAP_S = 0.010
 FIXTURE_SEED = 20261019
 
 INPUT_COLUMNS = ("series", "time_s", "adc_value")
+COHORT_INPUT_COLUMNS = ("subject_id", "side", "series", "time_s", "adc_value")
+SIDES = ("left", "right")
+COHORT_PREFIX_COLUMNS = ("subject_id", "side")
 MASK_COLUMNS = (
     "series", "run_index", "sample_index", "time_s", "control_valid",
     "hp20_valid", "hp40_valid", "bp20_400_valid", "fir_bp20_400_valid",
@@ -423,6 +427,95 @@ def analyze_arrays(
     return result
 
 
+def analyze_cohort_arrays(
+    recordings: Mapping[tuple[str, str, str], tuple[Iterable[float], Iterable[float]]],
+    *,
+    gap_s: float = GAP_THRESHOLD_S,
+    window_seconds: float = WINDOW_SECONDS,
+    overlap: float = WINDOW_OVERLAP,
+) -> PipelineResult:
+    """Process independently keyed recordings without cohort-level comparisons.
+
+    Keys are explicit ``(subject_id, side, series)`` tuples. The function only
+    aggregates export rows and structural counts; it does not create labels or
+    compare participants, sides, or series.
+    """
+
+    if not recordings:
+        raise ValueError("at least one subject/side/series recording is required")
+
+    tagged = PipelineResult(summary={})
+    group_summaries: list[dict[str, object]] = []
+    subjects: set[str] = set()
+    series_seen: set[str] = set()
+    row_fields = (
+        "mask_rows", "segment_rows", "feature_rows", "fft_rows", "psd_rows", "stft_rows"
+    )
+
+    for key, (times_value, signal_value) in recordings.items():
+        if not isinstance(key, tuple) or len(key) != 3:
+            raise ValueError("each cohort recording key must contain subject_id, side, and series")
+        subject_id, side, series = key
+        if not isinstance(subject_id, str) or not subject_id or subject_id != subject_id.strip():
+            raise ValueError("subject_id must be present and have no surrounding whitespace")
+        if side not in SIDES:
+            raise ValueError("side values must be exactly left or right")
+        if series not in SERIES:
+            raise ValueError("series values must be R1-R5")
+
+        times = np.asarray(times_value, dtype=float)
+        signal = np.asarray(signal_value, dtype=float)
+        if times.ndim != 1 or signal.ndim != 1 or times.size != signal.size:
+            raise ValueError("each cohort recording needs matching one-dimensional times and values")
+        if times.size < 2 or not np.isfinite(times).all() or not np.isfinite(signal).all():
+            raise ValueError("cohort recordings must contain at least two finite timestamps and samples")
+        if np.any(np.diff(times) <= 0):
+            raise ValueError("cohort timestamps must increase strictly; duplicate samples and clock resets are invalid")
+
+        group_result = analyze_arrays(
+            {series: (times, signal)},
+            gap_s=gap_s,
+            window_seconds=window_seconds,
+            overlap=overlap,
+        )
+        if group_result.summary["runs_processed"] == 0 or not group_result.feature_rows:
+            raise ValueError(
+                "a subject/side/series group is too short or has no complete valid analysis window"
+            )
+
+        subjects.add(subject_id)
+        series_seen.add(series)
+        group_summaries.append(group_result.summary)
+        for field_name in row_fields:
+            target_rows = getattr(tagged, field_name)
+            for row in getattr(group_result, field_name):
+                target_rows.append({"subject_id": subject_id, "side": side, **row})
+
+    first_summary = group_summaries[0]
+    tagged.summary = {
+        **first_summary,
+        "analysis_mode": "grouped_cohort_csv",
+        "series": [series for series in SERIES if series in series_seen],
+        "subject_count": len(subjects),
+        "recording_group_count": len(group_summaries),
+        "runs_total": sum(int(summary["runs_total"]) for summary in group_summaries),
+        "runs_processed": sum(int(summary["runs_processed"]) for summary in group_summaries),
+        "runs_skipped": sum(int(summary["runs_skipped"]) for summary in group_summaries),
+        "segment_rows": len(tagged.segment_rows),
+        "sample_mask_rows": len(tagged.mask_rows),
+        "window_rows": len(tagged.feature_rows),
+        "fft_rows": len(tagged.fft_rows),
+        "psd_rows": len(tagged.psd_rows),
+        "stft_rows": len(tagged.stft_rows),
+        "cohort_comparisons_computed": False,
+        "data_scope": (
+            "caller-supplied grouped CSV; independent signal processing only; "
+            "no fatigue labels or cross-subject, cross-side, or cross-series comparisons"
+        ),
+    }
+    return tagged
+
+
 def read_signal_csv(path: Path) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     """Read a strict three-column CSV; reject identity or other metadata fields."""
 
@@ -460,6 +553,108 @@ def read_signal_csv(path: Path) -> dict[str, tuple[np.ndarray, np.ndarray]]:
         series: (np.asarray(times, dtype=float), np.asarray(values, dtype=float))
         for series, (times, values) in recordings.items()
     }
+
+
+def read_cohort_signal_csv(
+    path: Path,
+) -> dict[tuple[str, str, str], tuple[np.ndarray, np.ndarray]]:
+    """Read explicit anonymized subject/side/series blocks from the caller CSV."""
+
+    recordings: dict[tuple[str, str, str], tuple[list[float], list[float]]] = {}
+    seen_groups: set[tuple[str, str, str]] = set()
+    previous_key: tuple[str, str, str] | None = None
+    with Path(path).open("r", newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        fields = reader.fieldnames or []
+        if len(fields) != len(set(fields)) or set(fields) != set(COHORT_INPUT_COLUMNS):
+            raise ValueError(
+                "cohort CSV must contain exactly these columns in any order: "
+                "subject_id,side,series,time_s,adc_value"
+            )
+        previous_time_by_key: dict[tuple[str, str, str], float] = {}
+        for line_number, row in enumerate(reader, start=2):
+            if None in row:
+                raise ValueError(f"unexpected extra field on CSV line {line_number}")
+            raw_subject_id = row["subject_id"]
+            if raw_subject_id is None or not raw_subject_id.strip():
+                raise ValueError(f"subject_id is required on CSV line {line_number}")
+            if raw_subject_id != raw_subject_id.strip():
+                raise ValueError(f"subject_id has surrounding whitespace on CSV line {line_number}")
+            subject_id = raw_subject_id
+            side = row["side"]
+            if side not in SIDES:
+                raise ValueError(f"side must be exactly left or right on CSV line {line_number}")
+            series = row["series"]
+            if series not in SERIES:
+                raise ValueError(f"series must be R1-R5 on CSV line {line_number}")
+            key = (subject_id, side, series)
+            if key != previous_key:
+                if key in seen_groups:
+                    raise ValueError("duplicate subject/side/series block in cohort CSV")
+                seen_groups.add(key)
+                previous_key = key
+            if row["time_s"] is None or row["adc_value"] is None:
+                raise ValueError(f"time_s and adc_value are required on CSV line {line_number}")
+            try:
+                time_s = float(row["time_s"])
+                adc_value = float(row["adc_value"])
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"invalid numeric value on CSV line {line_number}") from error
+            if not math.isfinite(time_s) or not math.isfinite(adc_value):
+                raise ValueError(f"CSV values must be finite on line {line_number}")
+            previous_time = previous_time_by_key.get(key)
+            if previous_time is not None and time_s <= previous_time:
+                if time_s == previous_time:
+                    raise ValueError("duplicate sample timestamp within subject/side/series group")
+                raise ValueError("clock reset or mixed time order within subject/side/series group")
+            previous_time_by_key[key] = time_s
+            if key not in recordings:
+                recordings[key] = ([], [])
+            recordings[key][0].append(time_s)
+            recordings[key][1].append(adc_value)
+    if not recordings:
+        raise ValueError("cohort CSV contains no subject/side/series samples")
+    return {
+        key: (np.asarray(times, dtype=float), np.asarray(values, dtype=float))
+        for key, (times, values) in recordings.items()
+    }
+
+
+def read_cohort_signal_fragments(
+    paths: Iterable[Path],
+) -> dict[tuple[str, str, str], tuple[np.ndarray, np.ndarray]]:
+    """Reassemble CSV fragments by explicit group and original timestamps.
+
+    Each fragment uses the same strict grouped CSV schema as
+    :func:`read_cohort_signal_csv`. Fragments may be supplied in any order;
+    samples are sorted by timestamp within each pseudonymized group. Overlaps,
+    duplicate timestamps, and clock resets are rejected. Real timestamp gaps
+    are preserved for the analyzer to split; missing samples are never filled.
+    """
+
+    fragment_paths = [Path(path) for path in paths]
+    if not fragment_paths:
+        raise ValueError("at least one cohort fragment CSV is required")
+    pieces: dict[tuple[str, str, str], list[tuple[np.ndarray, np.ndarray]]] = {}
+    for path in fragment_paths:
+        fragment = read_cohort_signal_csv(path)
+        for key, (times, values) in fragment.items():
+            pieces.setdefault(key, []).append((times, values))
+
+    recordings: dict[tuple[str, str, str], tuple[np.ndarray, np.ndarray]] = {}
+    for key in sorted(pieces):
+        group_pieces = pieces[key]
+        times = np.concatenate([piece[0] for piece in group_pieces])
+        values = np.concatenate([piece[1] for piece in group_pieces])
+        order = np.argsort(times, kind="stable")
+        times = times[order]
+        values = values[order]
+        if np.any(np.diff(times) <= 0):
+            raise ValueError(
+                "cohort fragments overlap or duplicate timestamp within subject/side/series group"
+            )
+        recordings[key] = (times, values)
+    return recordings
 
 
 def write_synthetic_fixture(path: Path, *, overwrite: bool = False) -> Path:
@@ -521,6 +716,8 @@ def write_result(result: PipelineResult, output_dir: Path) -> None:
         ("psd.csv", PSD_COLUMNS, result.psd_rows),
         ("stft.csv", STFT_COLUMNS, result.stft_rows),
     ):
+        if result.summary.get("analysis_mode") == "grouped_cohort_csv":
+            columns = COHORT_PREFIX_COLUMNS + columns
         _write_csv(output_dir / name, columns, rows)
 
 
@@ -528,38 +725,80 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--input", type=Path, help="CSV with only series,time_s,adc_value columns")
+    source.add_argument(
+        "--cohort-input",
+        type=Path,
+        help="grouped CSV with subject_id,side,series,time_s,adc_value columns",
+    )
+    source.add_argument(
+        "--cohort-fragments",
+        type=Path,
+        nargs="+",
+        help="one or more grouped CSV fragments with original, non-overlapping timestamps",
+    )
     source.add_argument("--demo", action="store_true", help="create and process deterministic synthetic R1-R5 data")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--overwrite", action="store_true", help="allow replacing outputs in an existing directory")
     args = parser.parse_args(argv)
     checkout_root = Path(__file__).resolve().parents[1]
-    paths = validate_data_paths({"input": args.input, "output_dir": args.output_dir}, checkout_root)
-    if args.input is not None and paths["input"] in {
-        paths["output_dir"] / name for name in OUTPUT_FILES
-    }:
+    path_values: dict[str, object] = {"output_dir": args.output_dir}
+    fragment_names: list[str] = []
+    if args.input is not None:
+        path_values["input"] = args.input
+    elif args.cohort_input is not None:
+        path_values["cohort_input"] = args.cohort_input
+    elif args.cohort_fragments is not None:
+        fragment_names = [f"fragment_{index}" for index in range(len(args.cohort_fragments))]
+        path_values.update(dict(zip(fragment_names, args.cohort_fragments)))
+    paths = validate_data_paths(path_values, checkout_root)
+    selected_inputs = (
+        [paths["input"]] if args.input is not None else
+        [paths["cohort_input"]] if args.cohort_input is not None else
+        [paths[name] for name in fragment_names]
+    )
+    if any(input_path in {paths["output_dir"] / name for name in OUTPUT_FILES} for input_path in selected_inputs):
         raise ValueError("input CSV path conflicts with a generated output filename")
-    output_dir = _ensure_output_dir(paths["output_dir"], overwrite=args.overwrite)
     if args.demo:
+        output_dir = _ensure_output_dir(paths["output_dir"], overwrite=args.overwrite)
         fixture = output_dir / "synthetic_emg.csv"
         write_synthetic_fixture(fixture, overwrite=args.overwrite)
         input_path = fixture
         input_source = "synthetic_demo"
-    else:
-        input_path = paths["input"]
-        input_source = "csv_input"
-    result = analyze_arrays(read_signal_csv(input_path))
-    result.summary["input_source"] = input_source
-    if args.demo:
+        result = analyze_arrays(read_signal_csv(input_path))
+        result.summary["input_source"] = input_source
         result.summary["synthetic_fixture"] = (
             "deterministic multisine plus low-amplitude Gaussian noise; "
             "software fixture, not a physiological EMG simulator"
         )
         result.summary["data_scope"] = "synthetic fixtures only; no study results are reproduced and no cohort data are used"
     else:
-        result.summary["data_scope"] = (
-            "caller-supplied CSV without identity columns; single-recording processing only; "
-            "no cohort-level study results are computed"
-        )
+        if args.cohort_fragments is not None:
+            recordings = read_cohort_signal_fragments(selected_inputs)
+            result = analyze_cohort_arrays(recordings)
+            result.summary["input_source"] = "cohort_fragments"
+            result.summary["fragment_file_count"] = len(selected_inputs)
+            result.summary["sample_count"] = sum(len(times) for times, _ in recordings.values())
+            result.summary["data_scope"] = (
+                "caller-supplied grouped CSV fragments reassembled by pseudonymized group and original timestamps; "
+                "independent signal processing only; no fatigue labels or cross-subject, cross-side, or cross-series comparisons"
+            )
+        elif args.cohort_input is not None:
+            result = analyze_cohort_arrays(read_cohort_signal_csv(selected_inputs[0]))
+            result.summary["input_source"] = "cohort_csv"
+        else:
+            result = analyze_arrays(read_signal_csv(selected_inputs[0]))
+            result.summary["input_source"] = "csv_input"
+            result.summary["data_scope"] = (
+                "caller-supplied CSV without identity columns; single-recording processing only; "
+                "no cohort-level study results are computed"
+            )
+        output_dir = _ensure_output_dir(paths["output_dir"], overwrite=args.overwrite)
+    if not args.demo and (args.cohort_input is not None or args.cohort_fragments is not None):
+        if args.cohort_fragments is None:
+            result.summary["data_scope"] = (
+                "caller-supplied grouped CSV; independent signal processing only; "
+                "no fatigue labels or cross-subject, cross-side, or cross-series comparisons"
+            )
     write_result(result, output_dir)
     print(json.dumps(result.summary, ensure_ascii=False, indent=2, allow_nan=False))
     return 0

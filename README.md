@@ -61,11 +61,34 @@ $privateOut = Join-Path $env:LOCALAPPDATA 'EMG_Biomecanica\emg_referencia'
 python src\reproducir_emg_referencia.py --input '<CSV_WITHOUT_ID_COLUMNS>' --output-dir $privateOut
 ```
 
+### Entrada tabular de grabaciones agrupadas
+
+Hay un modo separado para quien ya disponga de un CSV de cohorte con IDs seudonimizados. Su contrato requiere exactamente las columnas `subject_id`, `side`, `series`, `time_s` y `adc_value`, en cualquier orden; `side` debe ser `left` o `right` y `series`, `R1`–`R5`. Cada combinación `(subject_id, side, series)` debe ocupar un solo bloque contiguo y sus marcas `time_s` deben aumentar estrictamente. El lector rechaza IDs vacíos o con espacios externos, valores de lateralidad/serie no válidos, bloques repetidos, marcas duplicadas o reinicios del reloj. Cada grupo debe producir al menos una ventana completa de 1 s después de aplicar la máscara común de bordes; si no, se detiene antes de escribir resultados.
+
+```powershell
+$privateOut = Join-Path $env:LOCALAPPDATA 'EMG_Biomecanica\emg_referencia_cohorte'
+python src\reproducir_emg_referencia.py --cohort-input '<ANONYMIZED_COHORT_CSV>' --output-dir $privateOut
+```
+
+El modo procesa cada grupo de forma independiente y añade `subject_id` y `side` a sus tablas de salida para conservar la clave `(subject_id, side, series)`. Solo resume conteos estructurales; no crea etiquetas de fatiga ni calcula comparaciones entre personas, lados o series. Todos los CSV de salida contienen resultados a nivel de señal/ventana y deben mantenerse en almacenamiento restringido. La herramienta no puede verificar que un ID sea realmente anónimo, que las etiquetas coincidan con la identidad real de la grabación o que el CSV cumpla otros metadatos de adquisición. Como el contrato no tiene un identificador de grabación independiente, no puede detectar si una nueva combinación de claves representa una etiqueta equivocada; debe confirmarse antes de preparar el CSV. Se ejecutó una prueba de humo con un único registro formal real, cuyo SHA-256 se enlazó con el manifiesto privado; esto comprueba el lector y el procesador para ese registro, pero no valida un lote de 138 grabaciones ni todas las 15 personas. La entrada de una sola señal `--input` conserva su esquema estricto de tres columnas y no acepta IDs.
+
+### Reensamblado de fragmentos contiguos
+
+Para procesar una grabación que se exportó en varios CSV, usa `--cohort-fragments` con el mismo esquema agrupado. Cada archivo debe conservar las marcas de tiempo originales y una combinación `(subject_id, side, series)` por bloque. El programa ordena los fragmentos por marca de tiempo dentro de cada clave, rechaza solapamientos, marcas duplicadas y reinicios de reloj, y conserva los huecos para que el analizador separe los tramos sin interpolar.
+
+```powershell
+$fragments = @('<FRAGMENT_01.csv>', '<FRAGMENT_02.csv>', '<FRAGMENT_03.csv>')
+$privateOut = Join-Path $env:LOCALAPPDATA 'EMG_Biomecanica\emg_fragmentos_reensamblados'
+python src\reproducir_emg_referencia.py --cohort-fragments $fragments --output-dir $privateOut
+```
+
+Este modo recompone la señal en memoria antes de filtrar y calcular características. Es procesamiento por lotes fuera de línea, no streaming con estado: si los timestamps se reinician en cada exportación, no se adivinan desplazamientos temporales y la entrada se rechaza si causa solapamientos. Con fragmentos contiguos y marcas de tiempo intactas, las tablas de análisis coinciden con las de la grabación completa; los huecos reales permanecen separados. La prueba de equivalencia no representa una inferencia de modelo ni una reconstrucción de predicciones/Gantt.
+
 Para entradas de señales reales, conserva el CSV y todas las salidas en almacenamiento local autorizado y restringido. La herramienta impide escribir dentro del checkout, pero no detecta carpetas sincronizadas por otros servicios. No publiques los resultados a nivel de ventana o serie.
 
 El flujo estima la frecuencia por la mediana de los intervalos temporales, separa gaps mayores que `max(1,5 ms, 1,5 × mediana del intervalo) + 1 ns` sin interpolar y omite tramos con dispersión temporal p95–p5 superior al 5 %. Requiere frecuencia estimada mayor de 800 Hz para la rama de 20–400 Hz y no remuestrea. Compara señal de control, HP20, HP40 y BP20–400 Butterworth de cuarto orden en fase cero, y BP20–400 FIR Hamming de 101 coeficientes. Una máscara común excluye los bordes de todos los filtros; sobre muestras válidas calcula ventanas Hann de 1 s con 50 % de solapamiento, RMS, MDF y MNF entre 20 y 400 Hz, FFT unilateral, PSD promedio y STFT. El archivo `features.csv` incluye tercios de posición temporal (`temprana`, `transicion`, `tardia`), que son un proxy de tiempo y no clases de fatiga.
 
-La salida contiene `segments.csv` (un resumen por tramo), `mask.csv` (máscara de validez por muestra y rama), `features.csv`, `fft.csv`, `psd.csv`, `stft.csv` y un `summary.json` sin rutas ni hashes de entrada. `input_source` vale `synthetic_demo` para la demo y `csv_input` para cualquier archivo CSV suministrado por quien ejecuta el programa; el CLI no verifica si ese archivo es sintético ni si su uso está autorizado. `--overwrite` permite reemplazar archivos de salida conocidos en una carpeta existente. El flujo no incluye notch, estimación de fuerza, etiquetas fisiológicas, entrenamiento, predicciones, modelo serializado ni figuras individuales. La ejecución sintética hace reproducible el contrato algorítmico, pero **no reproduce las métricas, predicciones ni resultados F31 de la cohorte local**. No se añadieron dependencias: NumPy ya está fijado en `requirements.txt`; el filtro se comparte con el módulo público `src/comparar_filtros_emg.py`.
+La salida contiene `segments.csv` (un resumen por tramo), `mask.csv` (máscara de validez por muestra y rama), `features.csv`, `fft.csv`, `psd.csv`, `stft.csv` y un `summary.json` sin rutas ni hashes de entrada. `input_source` identifica `synthetic_demo`, `csv_input`, `cohort_csv` o `cohort_fragments` según la entrada; el CLI no verifica si ese archivo es sintético ni si su uso está autorizado. `--overwrite` permite reemplazar archivos de salida conocidos en una carpeta existente. El flujo no incluye notch, estimación de fuerza, etiquetas fisiológicas, entrenamiento, predicciones, modelo serializado ni figuras individuales. La ejecución sintética hace reproducible el contrato algorítmico, pero **no reproduce las métricas, predicciones ni resultados F31 de la cohorte local**. No se añadieron dependencias: NumPy ya está fijado en `requirements.txt`; el filtro se comparte con el módulo público `src/comparar_filtros_emg.py`.
 
 Este recorrido prueba el comportamiento numérico del software. No verifica que una entrada sea EMG fisiológica, no identifica RAW/RECT/ENV o una calibración física y no selecciona un filtro fisiológicamente ganador.
 
