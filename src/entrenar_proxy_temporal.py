@@ -7,7 +7,7 @@ only participant-aggregated metrics are written to the project.
 """
 from __future__ import annotations
 
-from release_paths import validate_data_paths
+from release_paths import resolve_under_root, validate_data_paths, validate_path_component
 
 import argparse
 import csv
@@ -758,7 +758,19 @@ def extract_filtered_features(
             raise ValueError("recording ID and series index do not agree")
         if leg not in {"left", "right"}:
             raise ValueError("unexpected laterality in the frozen proxy table")
-        npz_path = Path(signals_root) / f"{participant}_{recording}_{leg}.npz"
+        filename = "_".join(
+            (
+                validate_path_component(participant, field_name="participant_id"),
+                validate_path_component(recording, field_name="recording_id"),
+                validate_path_component(leg, field_name="leg"),
+            )
+        ) + ".npz"
+        npz_path = resolve_under_root(
+            Path(signals_root),
+            filename,
+            field_name="filter trace path",
+            must_exist=True,
+        )
         if not npz_path.is_file():
             raise FileNotFoundError("a private pseudonymized filter trace is missing")
         signal_hashes.append(_sha256(npz_path))

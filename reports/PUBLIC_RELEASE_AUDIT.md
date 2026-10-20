@@ -1,7 +1,7 @@
-# Auditoría del paquete público EMG — F31/F43
+# Auditoría del paquete público EMG — F31/F44
 
-**Fecha:** 19 de octubre de 2026
-**Estado:** candidato público intermedio. La base remota revisada antes de esta ampliación fue `9a53053f819580803fe01f148429abc3ba7b5731`; esta actualización incorpora una interfaz CSV agrupada y sus pruebas. El paquete sigue sin incluir un modelo Borg verificable ni una validación fisiológica de fatiga.
+**Fecha:** 19–20 de octubre de 2026
+**Estado:** candidato público intermedio. La base remota revisada antes de esta ampliación fue `9a53053f819580803fe01f148429abc3ba7b5731`; esta actualización incorpora una interfaz CSV agrupada, reensamblado de fragmentos y correcciones puntuales de seguridad. El paquete sigue sin incluir un modelo Borg verificable ni una validación fisiológica de fatiga.
 
 **Referencia remota base:** `main` apuntaba a `9a53053f819580803fe01f148429abc3ba7b5731` (`Fix public EMG pipeline provenance and audit metadata`) antes de esta actualización. La matriz describe también los límites de la interfaz agrupada añadida en F43; la verificación del commit remoto actualizado se registra en la gestión local del proyecto.
 
@@ -13,14 +13,14 @@ El informe público conserva resultados agregados locales. Se eliminaron las fig
 
 ## Controles verificados
 
-- Los 17 módulos compilan; los módulos de lateralidad, filtros y referencia rechazan rutas de entrada o salida dentro del checkout público.
-- Las 33 pruebas de `unittest` cubren agregación por persona, heatmap izquierda/derecha, máscara y segmentación con fixtures sintéticas, filtros, RMS/MDF/MNF, FFT/PSD/STFT y validación de entradas. `--help` no lee grabaciones ni entrena.
+- Los módulos compilan; los módulos de lateralidad, filtros y referencia rechazan rutas de entrada o salida dentro del checkout público. Los flujos de rutas derivadas comprueban su contención y los identificadores de cohorte se neutralizan en la frontera de exportación CSV.
+- La suite local pasó 43 pruebas de `unittest`, incluidas pruebas de traversal POSIX/Windows, junctions, pseudónimos Unicode y neutralización de fórmulas en las seis tablas. `pip check` no encontró dependencias rotas y `compileall` terminó correctamente. `--help` no lee grabaciones ni entrena.
 - `src/reproducir_emg_referencia.py --demo` procesa fixtures de software multisinusoidales R1–R5 (no un simulador fisiológico de EMG) y deja outputs temporales fuera del checkout; no genera resultados ni métricas de la cohorte F31.
 - DOCX con 44 referencias, 15 tablas nativas y ocho figuras agregadas o esquemas editables; sin checklist de envío, placeholders ni contenido individual de las tres figuras retiradas.
 - PDF exportado desde Word en A4, con 22 páginas renderizadas e inspeccionadas; no se detectaron desbordes ni tablas rotas.
 - Las dos bibliografías se cotejaron con las versiones consolidadas y no se modificaron.
 - La matriz por lado reporta 14 grupos izquierdos y 15 derechos, con 14 pareados; la diferencia Macro-F1 incluye cero.
-- El manifiesto `SHA256SUMS` contiene 33 entradas y sus 33 archivos se verificaron sin discrepancias. La actualización pública se envió a `main` y se comprobó el head remoto tras el push.
+- El manifiesto `SHA256SUMS` de la base histórica tenía 33 entradas; se recalculará y comprobará para esta revisión antes de cualquier actualización remota. La actualización F44-04 aún debe reconciliarse con el estado actual de `main`.
 
 ## Matriz de brechas de reproducibilidad
 
@@ -34,7 +34,7 @@ El informe público conserva resultados agregados locales. Se eliminaron las fig
 | Sensibilidad a filtros | Las funciones de respuesta y resumen están en `src/analizar_filtros_matematicos.py`; las pruebas verifican coeficientes y algunos resúmenes construidos con valores sintéticos. | La auditoría completa de sensibilidad necesita el recibo y archivos privados del análisis. La demo compara ramas, pero no reconstruye la sensibilidad ni sus resultados para la cohorte. |
 | Evaluación Borg/RPE | No hay módulo, esquema de entrada, columnas de puntuación, alineación temporal ni pruebas de Borg/RPE en el árbol remoto revisado. | No se puede evaluar asociación o rendimiento frente a Borg. Se requieren puntuaciones autorizadas, escala identificada, vínculo temporal con cada serie y protocolo de análisis aprobado. |
 | Entrenamiento e inferencia del modelo | `src/entrenar_proxy_temporal.py`, evaluadores y `src/serializar_modelo_proxy.py` contienen código para el proxy de tercios temporales; el serializador carga etiquetas, selección anidada y trazas locales. | Los scripts de cohorte exigen archivos privados y fijan el alcance a 15 grupos/414 segmentos. No se distribuye checkpoint ni hay un comando de inferencia con un modelo público verificado. La etiqueta es posición temporal, no fatiga. No se publica un modelo hasta verificar permisos, artefacto, preprocesamiento y evaluación de uso previsto. |
-| Pruebas y dependencias | `requirements.txt` fija NumPy, pandas y Pillow; las 33 pruebas `unittest` no cargan la cohorte privada completa. | La suite comprueba contratos y agregaciones sintéticas, no reproduce resultados F31 ni sustituye validación fisiológica. El árbol remoto no contiene un flujo de CI visible. El smoke agrupado real cubre un registro individual, no la cohorte. |
+| Pruebas y dependencias | `requirements.txt` fija NumPy, pandas y Pillow; la suite actual tiene 43 pruebas `unittest` y no carga la cohorte privada completa. | La suite comprueba contratos y agregaciones sintéticas, no reproduce resultados F31 ni sustituye validación fisiológica. El árbol remoto no contiene un flujo de CI visible. El smoke agrupado real cubre un registro individual, no la cohorte. |
 | README y comandos | `README.md` documenta instalación, suite, ayuda del benchmark, demo, CSV individual y la interfaz CSV de cohorte; `datasets/README.md` restringe el uso de los datos. | Falta un conjunto completo de entradas privadas permitido para reproducir los resultados de cohorte. Antes de ejecutar los módulos privados se requieren datos autorizados, recibos coincidentes, particiones y destino con controles de acceso adecuados. |
 
 ## Riesgo de divulgación observado
@@ -60,3 +60,9 @@ No se añadió una licencia porque los derechos para otorgarla no se verificaron
 - La suite local pasó 36/36 pruebas; `compileall` y `--help` pasaron. Las tres pruebas nuevas cubren reordenación, preservación de huecos, rechazo de solapamientos y equivalencia del CLI frente a un archivo completo.
 - En almacenamiento restringido, una grabación formal R1 ya autorizada se procesó completa y luego como cuatro CSV contiguos. Las seis tablas de señal (`segments`, `mask`, `features`, `fft`, `psd`, `stft`) coincidieron byte por byte. La ejecución completa generó cinco ramas de filtro; la salida se mantuvo fuera del repositorio.
 - Este resultado verifica el reensamblado fuera de línea para una grabación. No demuestra que se haya procesado la cohorte completa, que haya una inferencia Borg funcional, que exista una predicción temporal/Gantt verificable ni que se detecte fatiga fisiológica. No se incluye ningún CSV, señal, salida individual, checkpoint ni hash privado en este paquete.
+
+## F44-04 — Correcciones de seguridad enfocadas (2026-10-20)
+
+La auditoría Codex Security de la revisión `009ba01016fa293b8e3715379f1ec35c6f9812a9` reportó dos hallazgos locales: CWE-22 en rutas derivadas de manifiestos/etiquetas y CWE-1236 en el campo `subject_id` exportado a CSV. Se añadieron resolución de rutas contenidas en la raíz configurada, validación de componentes de nombre de archivo y neutralización de prefijos de fórmula únicamente en el CSV exportado. Las claves originales permanecen intactas en memoria. Una prueba con junction en Windows confirma el rechazo de una ruta que apunta fuera de su raíz; otra recorre las seis tablas agrupadas y confirma que sus identificadores de fórmula se exportan neutralizados.
+
+La revisión independiente post-cambio confirmó que ambas rutas de ataque estáticas están cerradas. El hash final vuelve a resolver el camino bajo la raíz. Permanece una limitación de carrera entre resolver y abrir si otro proceso puede modificar concurrentemente el árbol de entrada; el CLI de rutas no hace esa operación atómica. Las 43 pruebas locales, `compileall` y `pip check` pasaron. Esto verifica de forma dirigida los dos hallazgos; no convierte la cobertura parcial de la auditoría original en una revisión integral del repositorio. Tampoco agrega validación de un modelo Borg, fatiga fisiológica, inferencia en tiempo real, dashboard o Gantt. Las funciones de procesamiento existentes siguen siendo el CLI por lotes documentado arriba.

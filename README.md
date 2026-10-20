@@ -34,6 +34,8 @@ Para la señal centrada de cada ventana, RMS = sqrt((1/N) sum x_c[n]^2). Se esti
 
 Se verificaron Python 3.12.14, NumPy 2.3.5, pandas 3.0.1 y Pillow 12.3.0. El entorno mínimo y comandos de ayuda están en `requirements.txt` y en cada módulo. La inspección de ayuda no lee datos ni lanza entrenamiento. Los argumentos de datos y salida deben apuntar a almacenamiento autorizado fuera de este repositorio.
 
+Los nombres de archivo derivados de manifiestos y tablas de etiquetas se validan como componentes individuales y las rutas se resuelven dentro de su raíz configurada, incluidas las comprobaciones de enlaces simbólicos. En las seis tablas CSV del modo agrupado, los identificadores con prefijo de fórmula se neutralizan solo al exportar; las claves originales se conservan durante el procesamiento.
+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1

@@ -8,7 +8,7 @@ repetition count, active contraction time, or task failure.
 
 from __future__ import annotations
 
-from release_paths import validate_data_paths
+from release_paths import resolve_under_root, validate_data_paths, validate_path_component
 
 import argparse
 import hashlib
@@ -272,7 +272,10 @@ def _sha256(path: Path) -> str:
 
 
 def _record_id_stem(row: pd.Series) -> str:
-    return f"{row['participant_id']}_{row['recording_id']}_{row['leg']}"
+    return "_".join(
+        validate_path_component(row[field], field_name=field)
+        for field in ("participant_id", "recording_id", "leg")
+    )
 
 
 def _summarize_public(
@@ -385,7 +388,12 @@ def analyze_dataset(private_datasets: Path, public_out: Path) -> dict[str, Any]:
     total_windows = 0
     missing_inputs = 0
     for _, meta in manifest.iterrows():
-        npz_path = filtered_root / f"{_record_id_stem(meta)}.npz"
+        npz_path = resolve_under_root(
+            filtered_root,
+            f"{_record_id_stem(meta)}.npz",
+            field_name="filtered trace path",
+            must_exist=True,
+        )
         if not npz_path.is_file():
             missing_inputs += 1
             continue

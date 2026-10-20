@@ -686,11 +686,29 @@ def write_synthetic_fixture(path: Path, *, overwrite: bool = False) -> Path:
     return path
 
 
+def _spreadsheet_safe_identifier(value: object) -> object:
+    """Keep untrusted identifiers inert when a CSV is opened in a spreadsheet."""
+    if not isinstance(value, str):
+        return value
+    leading = value.lstrip(" \t\r\n\v\f\ufeff")
+    if value.startswith(("\t", "\r", "\n")) or (
+        leading and leading[0] in "=+-@"
+    ):
+        return "'" + value
+    return value
+
 def _write_csv(path: Path, columns: tuple[str, ...], rows: list[dict[str, object]]) -> None:
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="raise")
         writer.writeheader()
-        writer.writerows(rows)
+        if "subject_id" in columns:
+            exported_rows = [
+                {**row, "subject_id": _spreadsheet_safe_identifier(row.get("subject_id"))}
+                for row in rows
+            ]
+        else:
+            exported_rows = rows
+        writer.writerows(exported_rows)
 
 
 def _ensure_output_dir(path: Path, *, overwrite: bool) -> Path:

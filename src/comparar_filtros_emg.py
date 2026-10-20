@@ -7,7 +7,7 @@ the configured private directory; the project output is aggregated.
 
 from __future__ import annotations
 
-from release_paths import validate_data_paths
+from release_paths import resolve_under_root, validate_data_paths, validate_path_component
 
 import argparse
 import csv
@@ -482,6 +482,10 @@ def run_filter_comparison(
     actual_relpaths = sorted(p.relative_to(signal_root).as_posix() for p in signal_root.rglob("*.csv"))
     if sorted(manifest_relpaths) != actual_relpaths:
         raise ValueError("private CSV file set does not exactly match the manifest")
+    for item in manifest:
+        validate_path_component(item.get("participant_id"), field_name="participant_id")
+        validate_path_component(item.get("recording_id"), field_name="recording_id")
+        validate_path_component(item.get("leg", "unknown"), field_name="leg")
     keys = [(item["participant_id"], item["recording_id"], item.get("leg", "unknown")) for item in manifest]
     if len(set(keys)) != len(keys):
         raise ValueError("manifest contains duplicate participant-recording-leg keys")
@@ -499,11 +503,12 @@ def run_filter_comparison(
     input_hashes_unchanged = True
     for item in manifest:
         relative = Path(item["relative_path"])
-        if relative.is_absolute() or ".." in relative.parts:
-            raise ValueError("manifest relative_path must stay below the private signal root")
-        path = (signal_root / relative).resolve()
-        if signal_root.resolve() not in path.parents:
-            raise ValueError("manifest path escapes the private signal root")
+        path = resolve_under_root(
+            signal_root,
+            item["relative_path"],
+            field_name="manifest relative_path",
+            must_exist=True,
+        )
         expected_hash = item.get("sha256_uncompressed", "")
         if not path.is_file():
             raise FileNotFoundError(f"private pseudonymized signal is missing: {relative}")
@@ -627,8 +632,19 @@ def run_filter_comparison(
         record_id = item["recording_id"]
         pid = item["participant_id"]
         leg = item.get("leg", "unknown")
-        safe_stem = f"{pid}_{record_id}_{leg}"
-        private_record_path = private_output / f"{safe_stem}.npz"
+        safe_stem = "_".join(
+            (
+                validate_path_component(pid, field_name="participant_id"),
+                validate_path_component(record_id, field_name="recording_id"),
+                validate_path_component(leg, field_name="leg"),
+            )
+        )
+        private_record_path = resolve_under_root(
+            private_output,
+            f"{safe_stem}.npz",
+            field_name="private output path",
+            must_exist=False,
+        )
         arrays = {"times_s": t, "adc_original": original, "common_comparison_mask": common_mask}
         arrays.update({name: branches[name].astype(np.float32) for name in FILTER_BRANCHES})
         arrays.update({f"applied_{name}": mask for name, mask in applied_masks.items()})
@@ -663,7 +679,12 @@ def run_filter_comparison(
     if total_samples != expected_samples:
         raise ValueError("sample totals do not reconcile with manifest")
     for record in private_records:
-        current_path = signal_root / Path(record["input_path"])
+        current_path = resolve_under_root(
+            signal_root,
+            record["input_path"],
+            field_name="manifest relative_path",
+            must_exist=True,
+        )
         if _sha256(current_path) != record["input_sha256"]:
             input_hashes_unchanged = False
             break

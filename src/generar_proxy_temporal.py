@@ -8,7 +8,7 @@ restricted local storage outside synchronized project folders.
 """
 from __future__ import annotations
 
-from release_paths import validate_data_paths
+from release_paths import resolve_under_root, validate_data_paths
 
 import argparse
 import csv
@@ -184,8 +184,12 @@ def generate(manifest_path: Path, signals_root: Path, output_dir: Path, seed: in
     records_seen = set()
     participant_ids = sorted({row["participant_id"] for row in eligible})
     for record in eligible:
-        relative = Path(*record["relative_path"].replace("\\", "/").split("/"))
-        signal_path = signals_root / relative
+        signal_path = resolve_under_root(
+            signals_root,
+            record["relative_path"],
+            field_name="relative_path",
+            must_exist=True,
+        )
         if not signal_path.is_file():
             raise FileNotFoundError("A pseudonymized manifest path does not resolve.")
         start, end, sample_count = _read_time_bounds(signal_path)
