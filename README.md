@@ -2,7 +2,7 @@
 
 Este repositorio reúne código de procesamiento, pruebas, bibliografía y resultados agregados autorizados. El informe DOCX/PDF F31 que permanece en `reports/` es histórico y corresponde a un benchmark de posición temporal; no es el manuscrito F50 para revisión ni una versión final del estudio.
 
-El [estado público F50.5 (intermedio)](reports/F50.4_STATUS_20261020.md) actualiza los agregados F39 v3 y documenta el replay interno de Cerqueira. El [registro F50 previo](reports/F50_STATUS_20261020.md) conserva los hitos anteriores.
+El [estado público F50.5 (intermedio)](reports/F50.5_STATUS_20261020.md) actualiza los agregados F39 v3 y documenta el replay interno de Cerqueira. El [registro F50 previo](reports/F50_STATUS_20261020.md) conserva los hitos anteriores.
 
 El análisis fisiológico principal usa las grabaciones locales de cuádriceps y no confirma fatiga ni pérdida de fuerza. El benchmark Borg es un experimento separado de esfuerzo percibido en EMG de hombro. Cerqueira es una tercera rama para el auto-reporte ordinal de miembro superior: se reprodujo internamente una inferencia de pliegue retenido, pero el diagnóstico temporal/de tarea supera al predictor EMG y no se recomienda un modelo EMG para despliegue.
 
