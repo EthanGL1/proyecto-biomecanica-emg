@@ -146,7 +146,7 @@ class PublicEmgPipelineTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(main(["--input", str(fixture_path), "--output-dir", str(output_dir), "--overwrite"]), 0)
 
-            for name in ("summary.json", "segments.csv", "mask.csv", "features.csv", "fft.csv", "psd.csv", "stft.csv"):
+            for name in ("summary.json", "segments.csv", "mask.csv", "features.csv", "fft.csv", "psd.csv", "stft.csv", "activity_candidates.csv"):
                 self.assertTrue((output_dir / name).is_file(), name)
             with (output_dir / "features.csv").open(newline="", encoding="utf-8") as handle:
                 feature_rows = list(csv.DictReader(handle))
@@ -168,6 +168,29 @@ class PublicEmgPipelineTests(unittest.TestCase):
             self.assertEqual(summary["runs_processed"], 10)
             self.assertIn("not a physiological EMG simulator", summary["synthetic_fixture"])
             self.assertIn("no study results are reproduced", summary["data_scope"])
+
+    def test_demo_dashboard_writes_real_pipeline_traces_and_no_fatigue_score(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output_dir = Path(temporary) / "dashboard_run"
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(["--demo", "--dashboard", "--output-dir", str(output_dir)]),
+                    0,
+                )
+            html = (output_dir / "dashboard.html").read_text(encoding="utf-8")
+            self.assertLess((output_dir / "dashboard.html").stat().st_size, 10_000_000)
+            self.assertIn("Señal original y filtrada", html)
+            self.assertIn("STFT", html)
+            self.assertIn("RMS por ventana", html)
+            self.assertIn("FFT de ventana", html)
+            self.assertIn("PSD promedio", html)
+            self.assertIn("Envolvente candidata", html)
+            self.assertIn("score de fatiga validado", html.lower())
+            self.assertNotIn("synthetic_subject", html)
+            with (output_dir / "activity_candidates.csv").open(newline="", encoding="utf-8") as handle:
+                events = list(csv.DictReader(handle))
+            self.assertTrue(events)
+            self.assertTrue(all(row["interpretation"] == "candidate_activity_only" for row in events))
 
     def test_csv_input_summary_is_not_labeled_as_a_synthetic_fixture(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -374,19 +397,24 @@ class PublicEmgPipelineTests(unittest.TestCase):
 
             full_run = subprocess.run(
                 [sys.executable, str(ROOT / "src" / "reproducir_emg_referencia.py"),
-                 "--cohort-input", str(full), "--output-dir", str(full_output)],
+                 "--cohort-input", str(full), "--dashboard", "--dashboard-subject", "synthetic_subject_01",
+                 "--dashboard-side", "left", "--dashboard-series", "R1", "--output-dir", str(full_output)],
                 cwd=ROOT, check=False, capture_output=True, text=True,
             )
             fragment_run = subprocess.run(
                 [sys.executable, str(ROOT / "src" / "reproducir_emg_referencia.py"),
-                 "--cohort-fragments", str(second), str(first), "--output-dir", str(fragment_output)],
+                 "--cohort-fragments", str(second), str(first), "--dashboard", "--dashboard-subject", "synthetic_subject_01",
+                 "--dashboard-side", "left", "--dashboard-series", "R1", "--output-dir", str(fragment_output)],
                 cwd=ROOT, check=False, capture_output=True, text=True,
             )
 
             self.assertEqual(full_run.returncode, 0, full_run.stderr)
             self.assertEqual(fragment_run.returncode, 0, fragment_run.stderr)
-            for filename in ("segments.csv", "mask.csv", "features.csv", "fft.csv", "psd.csv", "stft.csv"):
+            for filename in ("segments.csv", "mask.csv", "features.csv", "fft.csv", "psd.csv", "stft.csv", "activity_candidates.csv"):
                 self.assertEqual((fragment_output / filename).read_bytes(), (full_output / filename).read_bytes(), filename)
+            self.assertEqual((fragment_output / "dashboard.html").read_bytes(), (full_output / "dashboard.html").read_bytes())
+            dashboard = (fragment_output / "dashboard.html").read_text(encoding="utf-8")
+            self.assertNotIn("synthetic_subject_01", dashboard)
             summary = json.loads((fragment_output / "summary.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["input_source"], "cohort_fragments")
             self.assertEqual(summary["fragment_file_count"], 2)

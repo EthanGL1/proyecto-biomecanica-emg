@@ -26,6 +26,7 @@ from comparar_filtros_emg import (
     recommended_sos_padlen,
     split_contiguous_runs as _split_contiguous_runs,
 )
+from emg_dashboard import derive_candidate_activity, render_dashboard_html
 from release_paths import validate_data_paths
 
 
@@ -74,7 +75,18 @@ STFT_COLUMNS = (
     "series", "run_index", "window_index", "time_s", "filter_branch",
     "frequency_hz", "psd_adc2_per_hz",
 )
-OUTPUT_FILES = ("summary.json", "segments.csv", "mask.csv", "features.csv", "fft.csv", "psd.csv", "stft.csv")
+TRACE_COLUMNS = (
+    "series", "run_index", "sample_index", "time_s", "raw_adc", "control_adc",
+    "hp20_adc", "hp40_adc", "bp20_400_adc", "fir_bp20_400_adc", "common_valid",
+)
+ACTIVITY_CANDIDATE_COLUMNS = (
+    "series", "run_index", "start_time_s", "end_time_s", "duration_s",
+    "threshold_rms_adc", "mean_rms_adc", "peak_rms_adc", "quality", "interpretation",
+)
+OUTPUT_FILES = (
+    "summary.json", "segments.csv", "mask.csv", "features.csv", "fft.csv",
+    "psd.csv", "stft.csv", "activity_candidates.csv", "dashboard.html",
+)
 
 
 @dataclass
@@ -88,6 +100,7 @@ class PipelineResult:
     fft_rows: list[dict[str, object]] = field(default_factory=list)
     psd_rows: list[dict[str, object]] = field(default_factory=list)
     stft_rows: list[dict[str, object]] = field(default_factory=list)
+    trace_rows: list[dict[str, object]] = field(default_factory=list)
 
 
 def split_contiguous_runs(
@@ -208,6 +221,38 @@ def _append_sample_mask(
         result.mask_rows.append(row)
 
 
+def _append_sample_traces(
+    result: PipelineResult,
+    series: str,
+    run_index: int,
+    times: np.ndarray,
+    raw: np.ndarray,
+    traces: Mapping[str, np.ndarray] | None = None,
+    branch_masks: Mapping[str, np.ndarray] | None = None,
+    common_mask: np.ndarray | None = None,
+) -> None:
+    if traces is None or branch_masks is None:
+        traces = {}
+        branch_masks = {}
+    common = common_mask if common_mask is not None else np.zeros(times.size, dtype=bool)
+    for index, time_s in enumerate(times):
+        row: dict[str, object] = {
+            "series": series,
+            "run_index": run_index,
+            "sample_index": index,
+            "time_s": float(time_s),
+            "raw_adc": float(raw[index]),
+            "common_valid": bool(common[index]),
+        }
+        for branch in FILTER_BRANCHES:
+            valid = branch_masks.get(branch)
+            values = traces.get(branch)
+            row[f"{branch}_adc"] = (
+                float(values[index]) if valid is not None and values is not None and valid[index] else None
+            )
+        result.trace_rows.append(row)
+
+
 def _spectral_metrics(signal: np.ndarray, fs_hz: float) -> tuple[float, float | None, float | None]:
     centered = signal - float(np.mean(signal))
     rms = float(np.sqrt(np.mean(centered**2)))
@@ -240,6 +285,7 @@ def analyze_arrays(
     gap_s: float = GAP_THRESHOLD_S,
     window_seconds: float = WINDOW_SECONDS,
     overlap: float = WINDOW_OVERLAP,
+    include_traces: bool = False,
 ) -> PipelineResult:
     """Run the reference filter, common-mask, feature, FFT, PSD, and STFT pipeline."""
 
@@ -296,18 +342,24 @@ def analyze_arrays(
                 mask_row["status"] = "insufficient_positive_time_intervals"
                 result.segment_rows.append(mask_row)
                 _append_sample_mask(result, series, run_index, run_times)
+                if include_traces:
+                    _append_sample_traces(result, series, run_index, run_times, run_signal)
                 skipped_runs += 1
                 continue
             if spread > MAX_INTERVAL_SPREAD_RATIO:
                 mask_row["status"] = "irregular_sampling_interval_spread_over_5_percent"
                 result.segment_rows.append(mask_row)
                 _append_sample_mask(result, series, run_index, run_times)
+                if include_traces:
+                    _append_sample_traces(result, series, run_index, run_times, run_signal)
                 skipped_runs += 1
                 continue
             if fs_hz <= 2.0 * HIGH_HZ:
                 mask_row["status"] = "sampling_frequency_must_exceed_800_hz"
                 result.segment_rows.append(mask_row)
                 _append_sample_mask(result, series, run_index, run_times)
+                if include_traces:
+                    _append_sample_traces(result, series, run_index, run_times, run_signal)
                 skipped_runs += 1
                 continue
 
@@ -320,11 +372,15 @@ def analyze_arrays(
                 mask_row["status"] = "insufficient_samples_after_common_filter_edge_mask"
                 result.segment_rows.append(mask_row)
                 _append_sample_mask(result, series, run_index, run_times, branch_masks, common_mask)
+                if include_traces:
+                    _append_sample_traces(result, series, run_index, run_times, run_signal, traces, branch_masks, common_mask)
                 skipped_runs += 1
                 continue
             mask_row["status"] = "processed"
             result.segment_rows.append(mask_row)
             _append_sample_mask(result, series, run_index, run_times, branch_masks, common_mask)
+            if include_traces:
+                _append_sample_traces(result, series, run_index, run_times, run_signal, traces, branch_masks, common_mask)
             processed_runs += 1
 
             window_samples = int(round(fs_hz * window_seconds))
@@ -422,6 +478,7 @@ def analyze_arrays(
         "fft_rows": len(result.fft_rows),
         "psd_rows": len(result.psd_rows),
         "stft_rows": len(result.stft_rows),
+        "dashboard_trace_rows": len(result.trace_rows),
         "data_scope": "signal processing only; no cohort-level study results are computed",
     }
     return result
@@ -433,6 +490,8 @@ def analyze_cohort_arrays(
     gap_s: float = GAP_THRESHOLD_S,
     window_seconds: float = WINDOW_SECONDS,
     overlap: float = WINDOW_OVERLAP,
+    include_traces: bool = False,
+    trace_key: tuple[str, str, str] | None = None,
 ) -> PipelineResult:
     """Process independently keyed recordings without cohort-level comparisons.
 
@@ -443,13 +502,17 @@ def analyze_cohort_arrays(
 
     if not recordings:
         raise ValueError("at least one subject/side/series recording is required")
+    if include_traces and trace_key is None:
+        raise ValueError("cohort dashboard requires an explicit subject/side/series selection")
+    if trace_key is not None and trace_key not in recordings:
+        raise ValueError("selected dashboard group is not present in the cohort input")
 
     tagged = PipelineResult(summary={})
     group_summaries: list[dict[str, object]] = []
     subjects: set[str] = set()
     series_seen: set[str] = set()
     row_fields = (
-        "mask_rows", "segment_rows", "feature_rows", "fft_rows", "psd_rows", "stft_rows"
+        "mask_rows", "segment_rows", "feature_rows", "fft_rows", "psd_rows", "stft_rows", "trace_rows"
     )
 
     for key, (times_value, signal_value) in recordings.items():
@@ -477,6 +540,7 @@ def analyze_cohort_arrays(
             gap_s=gap_s,
             window_seconds=window_seconds,
             overlap=overlap,
+            include_traces=include_traces and key == trace_key,
         )
         if group_result.summary["runs_processed"] == 0 or not group_result.feature_rows:
             raise ValueError(
@@ -722,10 +786,6 @@ def _ensure_output_dir(path: Path, *, overwrite: bool) -> Path:
 
 def write_result(result: PipelineResult, output_dir: Path) -> None:
     output_dir = Path(output_dir)
-    (output_dir / "summary.json").write_text(
-        json.dumps(result.summary, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
-        encoding="utf-8",
-    )
     for name, columns, rows in (
         ("segments.csv", SEGMENT_COLUMNS, result.segment_rows),
         ("mask.csv", MASK_COLUMNS, result.mask_rows),
@@ -737,6 +797,34 @@ def write_result(result: PipelineResult, output_dir: Path) -> None:
         if result.summary.get("analysis_mode") == "grouped_cohort_csv":
             columns = COHORT_PREFIX_COLUMNS + columns
         _write_csv(output_dir / name, columns, rows)
+    if result.summary.get("dashboard_exported"):
+        identity_fields = {"subject_id", "participant_id"}
+        traces = [{key: value for key, value in row.items() if key not in identity_fields} for row in result.trace_rows]
+        features = [{key: value for key, value in row.items() if key not in identity_fields} for row in result.feature_rows]
+        stft = [{key: value for key, value in row.items() if key not in identity_fields} for row in result.stft_rows]
+        segments = [{key: value for key, value in row.items() if key not in identity_fields} for row in result.segment_rows]
+        fft = [{key: value for key, value in row.items() if key not in identity_fields} for row in result.fft_rows]
+        psd = [{key: value for key, value in row.items() if key not in identity_fields} for row in result.psd_rows]
+        activity_frames, activity_events = derive_candidate_activity(traces)
+        _write_csv(output_dir / "activity_candidates.csv", ACTIVITY_CANDIDATE_COLUMNS, activity_events)
+        result.summary["dashboard_activity_detection"] = (
+            "exploratory Otsu threshold on 50 ms RMS windows with 50% overlap of the selected filtered trace; "
+            "candidate activity only, not verified contraction/rest/repetition/fatigue"
+        )
+        result.summary["dashboard_candidate_event_count"] = len(activity_events)
+        result.summary["dashboard_candidate_frame_count"] = len(activity_frames)
+        html = render_dashboard_html(
+            traces, features, stft, segments, fft, psd,
+            activity_frames=activity_frames, activity_events=activity_events,
+        )
+        (output_dir / "dashboard.html").write_text(html, encoding="utf-8")
+    else:
+        # Keep the known output set deterministic even when the dashboard is disabled.
+        _write_csv(output_dir / "activity_candidates.csv", ACTIVITY_CANDIDATE_COLUMNS, [])
+    (output_dir / "summary.json").write_text(
+        json.dumps(result.summary, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -757,7 +845,20 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--demo", action="store_true", help="create and process deterministic synthetic R1-R5 data")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--overwrite", action="store_true", help="allow replacing outputs in an existing directory")
+    parser.add_argument("--dashboard", action="store_true", help="write a local interactive HTML viewer; cohort mode requires one selected group")
+    parser.add_argument("--dashboard-subject", help="subject pseudonym to show in the dashboard for cohort inputs")
+    parser.add_argument("--dashboard-side", choices=SIDES, help="side to show in the dashboard for cohort inputs")
+    parser.add_argument("--dashboard-series", choices=SERIES, help="series to show in the dashboard for cohort inputs")
     args = parser.parse_args(argv)
+    dashboard_selection = (args.dashboard_subject, args.dashboard_side, args.dashboard_series)
+    if any(value is not None for value in dashboard_selection):
+        if not args.dashboard or args.cohort_input is None and args.cohort_fragments is None:
+            raise ValueError("dashboard group fields require --dashboard with a cohort input")
+        if any(value is None for value in dashboard_selection):
+            raise ValueError("dashboard group selection requires subject, side, and series")
+    if args.dashboard and (args.cohort_input is not None or args.cohort_fragments is not None) and any(value is None for value in dashboard_selection):
+        raise ValueError("cohort dashboard requires --dashboard-subject, --dashboard-side, and --dashboard-series")
+    trace_key = tuple(dashboard_selection) if all(value is not None for value in dashboard_selection) else None
     checkout_root = Path(__file__).resolve().parents[1]
     path_values: dict[str, object] = {"output_dir": args.output_dir}
     fragment_names: list[str] = []
@@ -782,7 +883,7 @@ def main(argv: list[str] | None = None) -> int:
         write_synthetic_fixture(fixture, overwrite=args.overwrite)
         input_path = fixture
         input_source = "synthetic_demo"
-        result = analyze_arrays(read_signal_csv(input_path))
+        result = analyze_arrays(read_signal_csv(input_path), include_traces=args.dashboard)
         result.summary["input_source"] = input_source
         result.summary["synthetic_fixture"] = (
             "deterministic multisine plus low-amplitude Gaussian noise; "
@@ -792,7 +893,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if args.cohort_fragments is not None:
             recordings = read_cohort_signal_fragments(selected_inputs)
-            result = analyze_cohort_arrays(recordings)
+            result = analyze_cohort_arrays(recordings, include_traces=args.dashboard, trace_key=trace_key)
             result.summary["input_source"] = "cohort_fragments"
             result.summary["fragment_file_count"] = len(selected_inputs)
             result.summary["sample_count"] = sum(len(times) for times, _ in recordings.values())
@@ -801,10 +902,10 @@ def main(argv: list[str] | None = None) -> int:
                 "independent signal processing only; no fatigue labels or cross-subject, cross-side, or cross-series comparisons"
             )
         elif args.cohort_input is not None:
-            result = analyze_cohort_arrays(read_cohort_signal_csv(selected_inputs[0]))
+            result = analyze_cohort_arrays(read_cohort_signal_csv(selected_inputs[0]), include_traces=args.dashboard, trace_key=trace_key)
             result.summary["input_source"] = "cohort_csv"
         else:
-            result = analyze_arrays(read_signal_csv(selected_inputs[0]))
+            result = analyze_arrays(read_signal_csv(selected_inputs[0]), include_traces=args.dashboard)
             result.summary["input_source"] = "csv_input"
             result.summary["data_scope"] = (
                 "caller-supplied CSV without identity columns; single-recording processing only; "
@@ -817,6 +918,9 @@ def main(argv: list[str] | None = None) -> int:
                 "caller-supplied grouped CSV; independent signal processing only; "
                 "no fatigue labels or cross-subject, cross-side, or cross-series comparisons"
             )
+    if args.dashboard:
+        result.summary["dashboard_exported"] = True
+        result.summary["dashboard_scope"] = "selected recording/group only; no model scores, fatigue classes, or participant identifier embedded"
     write_result(result, output_dir)
     print(json.dumps(result.summary, ensure_ascii=False, indent=2, allow_nan=False))
     return 0

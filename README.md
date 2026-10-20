@@ -56,12 +56,16 @@ $demoRoot = Join-Path $env:TEMP 'emg-referencia-sintetico'
 python src\reproducir_emg_referencia.py --demo --output-dir $demoRoot --overwrite
 ```
 
+Puedes añadir `--dashboard` para crear un visor HTML autónomo con señal original/filtrada, RMS, MDF/MNF, FFT de una ventana seleccionable, PSD promedio por tramo, STFT y un Gantt de calidad y actividad candidata. El visor ofrece selección R1–R5, filtro e intervalo temporal. El umbral Otsu se calcula solo como segmentación exploratoria de ventanas RMS de 50 ms con 50 % de solapamiento sobre BP20–400. “Por encima” del umbral es una actividad candidata; “por debajo” no confirma reposo. Ninguna de estas marcas verifica repeticiones, artefactos, fatiga ni puntuaciones de modelo.
+
 También acepta un CSV sintético o autorizado que no contenga columnas de identidad y tenga exactamente tres columnas: `series,time_s,adc_value`. Cada valor de `series` debe ser R1, R2, R3, R4 o R5; cada serie debe aparecer en un único bloque contiguo del archivo. Ejecuta un archivo por grabación. El lector rechaza columnas adicionales para impedir que entren IDs de participante o metadatos no previstos:
 
 ```powershell
 $privateOut = Join-Path $env:LOCALAPPDATA 'EMG_Biomecanica\emg_referencia'
 python src\reproducir_emg_referencia.py --input '<CSV_WITHOUT_ID_COLUMNS>' --output-dir $privateOut
 ```
+
+Para generar el tablero de esta grabación, añade `--dashboard`. El HTML incrusta solo esa señal y sus resultados y debe permanecer en almacenamiento restringido. No contiene identificadores de participante ni resultados de inferencia. También escribe `activity_candidates.csv` con serie, tramo, inicio/fin/duración, umbral RMS, RMS medio/pico y estado de calidad común; sus filas tienen interpretación `candidate_activity_only`.
 
 ### Entrada tabular de grabaciones agrupadas
 
@@ -70,6 +74,12 @@ Hay un modo separado para quien ya disponga de un CSV de cohorte con IDs seudoni
 ```powershell
 $privateOut = Join-Path $env:LOCALAPPDATA 'EMG_Biomecanica\emg_referencia_cohorte'
 python src\reproducir_emg_referencia.py --cohort-input '<ANONYMIZED_COHORT_CSV>' --output-dir $privateOut
+```
+
+El tablero de una cohorte requiere elegir exactamente un grupo; sus identificadores se usan para seleccionar la entrada y no se incrustan en `dashboard.html`:
+
+```powershell
+python src\reproducir_emg_referencia.py --cohort-input '<ANONYMIZED_COHORT_CSV>' --dashboard --dashboard-subject 'P01' --dashboard-side left --dashboard-series R1 --output-dir $privateOut
 ```
 
 El modo procesa cada grupo de forma independiente y añade `subject_id` y `side` a sus tablas de salida para conservar la clave `(subject_id, side, series)`. Solo resume conteos estructurales; no crea etiquetas de fatiga ni calcula comparaciones entre personas, lados o series. Todos los CSV de salida contienen resultados a nivel de señal/ventana y deben mantenerse en almacenamiento restringido. La herramienta no puede verificar que un ID sea realmente anónimo, que las etiquetas coincidan con la identidad real de la grabación o que el CSV cumpla otros metadatos de adquisición. Como el contrato no tiene un identificador de grabación independiente, no puede detectar si una nueva combinación de claves representa una etiqueta equivocada; debe confirmarse antes de preparar el CSV. Se ejecutó una prueba de humo con un único registro formal real, cuyo SHA-256 se enlazó con el manifiesto privado; esto comprueba el lector y el procesador para ese registro, pero no valida un lote de 138 grabaciones ni todas las 15 personas. La entrada de una sola señal `--input` conserva su esquema estricto de tres columnas y no acepta IDs.
@@ -84,13 +94,15 @@ $privateOut = Join-Path $env:LOCALAPPDATA 'EMG_Biomecanica\emg_fragmentos_reensa
 python src\reproducir_emg_referencia.py --cohort-fragments $fragments --output-dir $privateOut
 ```
 
+Se puede añadir `--dashboard` junto con `--dashboard-subject`, `--dashboard-side` y `--dashboard-series` para visualizar un único grupo reensamblado. La salida se calcula después de ordenar los fragmentos por sus marcas de tiempo originales.
+
 Este modo recompone la señal en memoria antes de filtrar y calcular características. Es procesamiento por lotes fuera de línea, no streaming con estado: si los timestamps se reinician en cada exportación, no se adivinan desplazamientos temporales y la entrada se rechaza si causa solapamientos. Con fragmentos contiguos y marcas de tiempo intactas, las tablas de análisis coinciden con las de la grabación completa; los huecos reales permanecen separados. La prueba de equivalencia no representa una inferencia de modelo ni una reconstrucción de predicciones/Gantt.
 
 Para entradas de señales reales, conserva el CSV y todas las salidas en almacenamiento local autorizado y restringido. La herramienta impide escribir dentro del checkout, pero no detecta carpetas sincronizadas por otros servicios. No publiques los resultados a nivel de ventana o serie.
 
 El flujo estima la frecuencia por la mediana de los intervalos temporales, separa gaps mayores que `max(1,5 ms, 1,5 × mediana del intervalo) + 1 ns` sin interpolar y omite tramos con dispersión temporal p95–p5 superior al 5 %. Requiere frecuencia estimada mayor de 800 Hz para la rama de 20–400 Hz y no remuestrea. Compara señal de control, HP20, HP40 y BP20–400 Butterworth de cuarto orden en fase cero, y BP20–400 FIR Hamming de 101 coeficientes. Una máscara común excluye los bordes de todos los filtros; sobre muestras válidas calcula ventanas Hann de 1 s con 50 % de solapamiento, RMS, MDF y MNF entre 20 y 400 Hz, FFT unilateral, PSD promedio y STFT. El archivo `features.csv` incluye tercios de posición temporal (`temprana`, `transicion`, `tardia`), que son un proxy de tiempo y no clases de fatiga.
 
-La salida contiene `segments.csv` (un resumen por tramo), `mask.csv` (máscara de validez por muestra y rama), `features.csv`, `fft.csv`, `psd.csv`, `stft.csv` y un `summary.json` sin rutas ni hashes de entrada. `input_source` identifica `synthetic_demo`, `csv_input`, `cohort_csv` o `cohort_fragments` según la entrada; el CLI no verifica si ese archivo es sintético ni si su uso está autorizado. `--overwrite` permite reemplazar archivos de salida conocidos en una carpeta existente. El flujo no incluye notch, estimación de fuerza, etiquetas fisiológicas, entrenamiento, predicciones, modelo serializado ni figuras individuales. La ejecución sintética hace reproducible el contrato algorítmico, pero **no reproduce las métricas, predicciones ni resultados F31 de la cohorte local**. No se añadieron dependencias: NumPy ya está fijado en `requirements.txt`; el filtro se comparte con el módulo público `src/comparar_filtros_emg.py`.
+La salida contiene `segments.csv` (un resumen por tramo), `mask.csv` (máscara de validez por muestra y rama), `features.csv`, `fft.csv`, `psd.csv`, `stft.csv`, `activity_candidates.csv` (vacío salvo cuando se solicita el tablero) y un `summary.json` sin rutas ni hashes de entrada. Con `--dashboard` también se genera `dashboard.html` para una grabación sin identidad o para un único grupo seleccionado. El Gantt distingue actividad candidata por envolvente RMS de muestras no evaluables por la máscara de procesamiento; no clasifica calidad fisiológica, movimiento o saturación. `input_source` identifica `synthetic_demo`, `csv_input`, `cohort_csv` o `cohort_fragments` según la entrada; el CLI no verifica si ese archivo es sintético ni si su uso está autorizado. `--overwrite` permite reemplazar archivos de salida conocidos en una carpeta existente. El flujo no incluye notch, estimación de fuerza, etiquetas fisiológicas, entrenamiento, predicciones, modelo serializado ni puntuaciones de fatiga. La ejecución sintética hace reproducible el contrato algorítmico, pero **no reproduce las métricas, predicciones ni resultados F31 de la cohorte local**. No se añadieron dependencias: NumPy ya está fijado en `requirements.txt`; el filtro se comparte con el módulo público `src/comparar_filtros_emg.py`.
 
 Este recorrido prueba el comportamiento numérico del software. No verifica que una entrada sea EMG fisiológica, no identifica RAW/RECT/ENV o una calibración física y no selecciona un filtro fisiológicamente ganador.
 
