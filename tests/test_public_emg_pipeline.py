@@ -22,6 +22,8 @@ from reproducir_emg_referencia import (  # noqa: E402
     read_cohort_signal_fragments,
     read_signal_csv,
     split_contiguous_runs,
+    summarize_cohort_features,
+    write_result,
     write_synthetic_fixture,
 )
 
@@ -285,7 +287,7 @@ class PublicEmgPipelineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "too short"):
             analyze_cohort_arrays(recordings)
 
-    def test_cohort_cli_smoke_processes_synthetic_15_subject_fixture_without_comparisons(self):
+    def test_cohort_cli_smoke_processes_synthetic_15_subject_fixture_with_aggregate_summaries(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "synthetic_15_subject_cohort.csv"
@@ -307,7 +309,13 @@ class PublicEmgPipelineTests(unittest.TestCase):
             summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
             self.assertEqual(summary["subject_count"], 15)
             self.assertEqual(summary["recording_group_count"], 15)
-            self.assertFalse(summary["cohort_comparisons_computed"])
+            self.assertTrue(summary["cohort_comparisons_computed"])
+            self.assertEqual(summary["cohort_summary_rows"], 150)
+            for filename in ("cohort_by_side_series.csv", "cohort_r1_r5_paired.csv", "cohort_bilateral_paired.csv"):
+                with (output_dir / filename).open(newline="", encoding="utf-8") as handle:
+                    aggregate_rows = list(csv.DictReader(handle))
+                    self.assertNotIn("subject_id", aggregate_rows[0] if aggregate_rows else {})
+                    self.assertFalse(any("synthetic_subject" in str(row) for row in aggregate_rows))
             self.assertEqual(summary["fatigue_target"], "none; elapsed-time thirds are a position proxy only")
             rows = []
             for filename in ("segments.csv", "mask.csv", "features.csv", "fft.csv", "psd.csv", "stft.csv"):
@@ -323,6 +331,159 @@ class PublicEmgPipelineTests(unittest.TestCase):
             self.assertEqual({row["subject_id"] for row in rows}, {group[0] for group in groups})
             self.assertEqual({row["side"] for row in rows}, {"left", "right"})
             self.assertTrue(all(row["series"].startswith("R") for row in rows))
+
+    def test_cohort_summary_reduces_windows_before_participant_aggregation_and_pairs(self):
+        def feature(subject, side, series, rms, mdf, mnf, window):
+            return {
+                "subject_id": subject,
+                "side": side,
+                "series": series,
+                "filter_branch": "bp20_400",
+                "rms_adc": rms,
+                "mdf_hz": mdf,
+                "mnf_hz": mnf,
+                "window_index": window,
+            }
+
+        rows = [
+            # Two overlapping windows reduce to one recording-level median.
+            feature("private_subject_A", "left", "R1", 9.0, 100.0, 150.0, 0),
+            feature("private_subject_A", "left", "R1", 11.0, 102.0, 152.0, 1),
+            feature("private_subject_A", "left", "R5", 11.0, 90.0, 140.0, 0),
+            feature("private_subject_A", "left", "R5", 13.0, 94.0, 144.0, 1),
+            feature("private_subject_A", "right", "R1", 14.0, 110.0, 160.0, 0),
+            feature("private_subject_A", "right", "R5", 15.0, 105.0, 155.0, 0),
+            # A second person contributes one window only; they lack R5 on left.
+            feature("private_subject_B", "left", "R1", 20.0, 120.0, 170.0, 0),
+            feature("private_subject_B", "right", "R1", 16.0, 116.0, 166.0, 0),
+            # Spectral estimates can be absent while RMS remains usable.
+            feature("private_subject_C", "left", "R1", 30.0, None, float("nan"), 0),
+        ]
+
+        result = summarize_cohort_features(rows)
+
+        r1_left_rms = next(
+            row for row in result["by_side_series"]
+            if (row["side"], row["series"], row["metric"]) == ("left", "R1", "rms_adc")
+        )
+        self.assertEqual(r1_left_rms["n_participants"], 3)
+        # Participant A's many windows do not outweigh B or C.
+        self.assertEqual(r1_left_rms["median"], 20.0)
+
+        r1_r5_rms = next(
+            row for row in result["r1_r5_paired"]
+            if (row["side"], row["metric"]) == ("left", "rms_adc")
+        )
+        self.assertEqual(r1_r5_rms["n_paired_participants"], 1)
+        self.assertEqual(r1_r5_rms["unit"], "%")
+        self.assertAlmostEqual(r1_r5_rms["median_change"], 20.0)
+        r1_r5_mdf = next(
+            row for row in result["r1_r5_paired"]
+            if (row["side"], row["metric"]) == ("left", "mdf_hz")
+        )
+        self.assertEqual(r1_r5_mdf["n_paired_participants"], 1)
+        self.assertAlmostEqual(r1_r5_mdf["median_change"], -9.0)
+
+        bilateral_r1_rms = next(
+            row for row in result["bilateral_paired"]
+            if (row["series"], row["metric"]) == ("R1", "rms_adc")
+        )
+        self.assertEqual(bilateral_r1_rms["n_paired_participants"], 2)
+        self.assertEqual(bilateral_r1_rms["unit"], "ADC counts")
+        self.assertAlmostEqual(bilateral_r1_rms["median_left_minus_right"], 0.0)
+        self.assertNotIn("subject_id", str(result))
+        self.assertNotIn("private_subject_", str(result))
+
+    def test_cohort_summary_rejects_preliminary_or_invalid_series(self):
+        row = {
+            "subject_id": "private_subject_A", "side": "left", "series": "R0",
+            "filter_branch": "bp20_400", "rms_adc": 1.0,
+            "mdf_hz": 80.0, "mnf_hz": 100.0,
+        }
+        with self.assertRaisesRegex(ValueError, "R1-R5"):
+            summarize_cohort_features([row])
+
+    def test_cohort_summary_rejects_malformed_nonempty_numeric_metrics(self):
+        row = {
+            "subject_id": "private_subject_A", "side": "left", "series": "R1",
+            "filter_branch": "bp20_400", "rms_adc": "not-a-number",
+            "mdf_hz": 80.0, "mnf_hz": 100.0,
+        }
+        with self.assertRaisesRegex(ValueError, "rms_adc"):
+            summarize_cohort_features([row])
+
+    def test_overwriting_with_single_signal_removes_stale_cohort_and_dashboard_products(self):
+        times = np.arange(3000, dtype=float) / 1000.0
+        signal = np.sin(2.0 * np.pi * 85.0 * times)
+        recordings = {("private_subject_A", "left", "R1"): (times, signal)}
+        cohort = analyze_cohort_arrays(
+            recordings, include_traces=True, trace_key=("private_subject_A", "left", "R1")
+        )
+        cohort.summary["dashboard_exported"] = True
+        single = analyze_arrays({"R1": (times, signal)})
+
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "reused_output"
+            output.mkdir()
+            write_result(cohort, output)
+            stale_products = (
+                "cohort_by_side_series.csv", "cohort_r1_r5_paired.csv",
+                "cohort_bilateral_paired.csv", "dashboard.html",
+            )
+            self.assertTrue(all((output / name).is_file() for name in stale_products))
+
+            write_result(single, output)
+
+            self.assertFalse(any((output / name).exists() for name in stale_products))
+
+    def test_cli_overwrite_after_cohort_run_removes_optional_prior_outputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cohort_input = root / "cohort.csv"
+            single_input = root / "single.csv"
+            output = root / "reused_output"
+            self._write_cohort_csv(
+                cohort_input, [("synthetic_subject_01", "left", "R1")], sample_count=3000
+            )
+            times = np.arange(3000, dtype=float) / 1000.0
+            signal = np.sin(2.0 * np.pi * 85.0 * times)
+            with single_input.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(("series", "time_s", "adc_value"))
+                writer.writerows(("R1", time_s, value) for time_s, value in zip(times, signal))
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main([
+                        "--cohort-input", str(cohort_input), "--dashboard",
+                        "--dashboard-subject", "synthetic_subject_01", "--dashboard-side", "left",
+                        "--dashboard-series", "R1", "--output-dir", str(output),
+                    ]),
+                    0,
+                )
+                self.assertEqual(
+                    main(["--input", str(single_input), "--output-dir", str(output), "--overwrite"]),
+                    0,
+                )
+
+            stale_products = (
+                "cohort_by_side_series.csv", "cohort_r1_r5_paired.csv",
+                "cohort_bilateral_paired.csv", "dashboard.html",
+            )
+            self.assertFalse(any((output / name).exists() for name in stale_products))
+
+    def test_aggregate_exports_do_not_contain_subject_identifiers(self):
+        times = np.arange(3000, dtype=float) / 1000.0
+        signal = np.sin(2.0 * np.pi * 85.0 * times)
+        result = analyze_cohort_arrays({("private_subject_DO_NOT_EXPORT", "left", "R1"): (times, signal)})
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "out"
+            output.mkdir()
+            write_result(result, output)
+            for filename in ("cohort_by_side_series.csv", "cohort_r1_r5_paired.csv", "cohort_bilateral_paired.csv"):
+                text = (output / filename).read_text(encoding="utf-8")
+                self.assertNotIn("subject_id", text)
+                self.assertNotIn("private_subject_DO_NOT_EXPORT", text)
 
     def test_fragment_reader_reassembles_chronologically_and_preserves_gaps(self):
         with tempfile.TemporaryDirectory() as temporary:

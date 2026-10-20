@@ -86,12 +86,30 @@ ACTIVITY_CANDIDATE_COLUMNS = (
 OUTPUT_FILES = (
     "summary.json", "segments.csv", "mask.csv", "features.csv", "fft.csv",
     "psd.csv", "stft.csv", "activity_candidates.csv", "dashboard.html",
+    "cohort_by_side_series.csv", "cohort_r1_r5_paired.csv", "cohort_bilateral_paired.csv",
+)
+COHORT_METRICS = (
+    ("rms_adc", "ADC counts"),
+    ("mdf_hz", "Hz"),
+    ("mnf_hz", "Hz"),
+)
+COHORT_SUMMARY_COLUMNS = (
+    "side", "series", "filter_branch", "metric", "unit", "n_participants",
+    "median", "q1", "q3", "aggregation",
+)
+COHORT_R1_R5_COLUMNS = (
+    "side", "filter_branch", "metric", "unit", "n_paired_participants",
+    "median_change", "q1_change", "q3_change", "change_definition", "aggregation",
+)
+COHORT_BILATERAL_COLUMNS = (
+    "series", "filter_branch", "metric", "unit", "n_paired_participants",
+    "median_left_minus_right", "q1_left_minus_right", "q3_left_minus_right", "aggregation",
 )
 
 
 @dataclass
 class PipelineResult:
-    """In-memory outputs for one or more synthetic/anonymous recordings."""
+    """In-memory outputs for one or more synthetic or caller-supplied recordings."""
 
     summary: dict[str, object]
     mask_rows: list[dict[str, object]] = field(default_factory=list)
@@ -101,6 +119,9 @@ class PipelineResult:
     psd_rows: list[dict[str, object]] = field(default_factory=list)
     stft_rows: list[dict[str, object]] = field(default_factory=list)
     trace_rows: list[dict[str, object]] = field(default_factory=list)
+    cohort_by_side_series_rows: list[dict[str, object]] = field(default_factory=list)
+    cohort_r1_r5_rows: list[dict[str, object]] = field(default_factory=list)
+    cohort_bilateral_rows: list[dict[str, object]] = field(default_factory=list)
 
 
 def split_contiguous_runs(
@@ -484,6 +505,137 @@ def analyze_arrays(
     return result
 
 
+def summarize_cohort_features(
+    feature_rows: Iterable[Mapping[str, object]],
+) -> dict[str, list[dict[str, object]]]:
+    """Create descriptive summaries without direct participant identifiers.
+
+    Overlapping windows are first reduced to one median per participant, side,
+    series, filter branch, and metric. Cohort summaries then use participants
+    as the unit. R1-R5 and bilateral contrasts use complete within-participant
+    pairs only. This generic summary has no activity mask and is not a fatigue
+    analysis; MDF/MNF estimates are included only when finite.
+    """
+
+    grouped: dict[tuple[str, str, str, str, str], list[float]] = {}
+    seen = False
+    for row in feature_rows:
+        seen = True
+        subject_id = row.get("subject_id")
+        side = row.get("side")
+        series = row.get("series")
+        branch = row.get("filter_branch")
+        if not isinstance(subject_id, str) or not subject_id or subject_id != subject_id.strip():
+            raise ValueError("cohort feature rows require a nonempty subject_id without surrounding whitespace")
+        if side not in SIDES:
+            raise ValueError("cohort feature rows require side left or right")
+        if series not in SERIES:
+            raise ValueError("cohort series values must be R1-R5; preliminary R0/R0_1 are not accepted")
+        if branch not in FILTER_BRANCHES:
+            raise ValueError("cohort feature rows contain an unknown filter_branch")
+        for metric, _unit in COHORT_METRICS:
+            value = row.get(metric)
+            if value is None or value == "":
+                continue
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"cohort feature metric {metric} must be numeric or missing") from error
+            if math.isfinite(numeric):
+                grouped.setdefault((subject_id, str(side), str(series), str(branch), metric), []).append(numeric)
+    if not seen:
+        raise ValueError("at least one cohort feature row is required")
+
+    # One feature value per recording prevents overlapping windows from acting
+    # as independent observations in the cohort summary.
+    recording_values = {
+        key: float(np.median(values))
+        for key, values in grouped.items()
+        if values
+    }
+    summary_groups: dict[tuple[str, str, str, str], dict[str, float]] = {}
+    r1_r5_groups: dict[tuple[str, str, str, str], dict[str, float]] = {}
+    bilateral_groups: dict[tuple[str, str, str, str], dict[str, float]] = {}
+    for (subject_id, side, series, branch, metric), value in recording_values.items():
+        summary_groups.setdefault((side, series, branch, metric), {})[subject_id] = value
+        if series == "R1":
+            r1_r5_groups.setdefault((side, branch, metric, subject_id), {})[series] = value
+        elif series == "R5":
+            r1_r5_groups.setdefault((side, branch, metric, subject_id), {})[series] = value
+        bilateral_groups.setdefault((series, branch, metric, subject_id), {})[side] = value
+
+    by_side_series: list[dict[str, object]] = []
+    unit_lookup = dict(COHORT_METRICS)
+    for (side, series, branch, metric), participants in sorted(summary_groups.items()):
+        values = np.asarray(list(participants.values()), dtype=np.float64)
+        by_side_series.append({
+            "side": side,
+            "series": series,
+            "filter_branch": branch,
+            "metric": metric,
+            "unit": unit_lookup[metric],
+            "n_participants": int(values.size),
+            "median": float(np.median(values)),
+            "q1": float(np.quantile(values, 0.25)),
+            "q3": float(np.quantile(values, 0.75)),
+            "aggregation": "window median per recording; participant median and IQR; descriptive, not a confidence interval",
+        })
+
+    r1_r5_paired: list[dict[str, object]] = []
+    paired_values: dict[tuple[str, str, str], list[float]] = {}
+    for (side, branch, metric, _subject_id), endpoints in r1_r5_groups.items():
+        if "R1" not in endpoints or "R5" not in endpoints:
+            continue
+        initial, final = endpoints["R1"], endpoints["R5"]
+        if metric == "rms_adc":
+            if initial == 0:
+                continue
+            difference = 100.0 * (final - initial) / abs(initial)
+        else:
+            difference = final - initial
+        paired_values.setdefault((side, branch, metric), []).append(float(difference))
+    for (side, branch, metric), items in sorted(paired_values.items()):
+        values = np.asarray(items, dtype=np.float64)
+        r1_r5_paired.append({
+            "side": side,
+            "filter_branch": branch,
+            "metric": metric,
+            "unit": "%" if metric == "rms_adc" else "Hz",
+            "n_paired_participants": int(values.size),
+            "median_change": float(np.median(values)),
+            "q1_change": float(np.quantile(values, 0.25)),
+            "q3_change": float(np.quantile(values, 0.75)),
+            "change_definition": "100*(R5-R1)/abs(R1)" if metric == "rms_adc" else "R5-R1",
+            "aggregation": "complete participant-side pairs; one recording median per endpoint; participant median and IQR; descriptive",
+        })
+
+    bilateral_paired: list[dict[str, object]] = []
+    bilateral_values: dict[tuple[str, str, str], list[float]] = {}
+    for (series, branch, metric, _subject_id), sides in bilateral_groups.items():
+        if "left" not in sides or "right" not in sides:
+            continue
+        bilateral_values.setdefault((series, branch, metric), []).append(sides["left"] - sides["right"])
+    for (series, branch, metric), items in sorted(bilateral_values.items()):
+        values = np.asarray(items, dtype=np.float64)
+        bilateral_paired.append({
+            "series": series,
+            "filter_branch": branch,
+            "metric": metric,
+            "unit": "ADC counts" if metric == "rms_adc" else "Hz",
+            "n_paired_participants": int(values.size),
+            "median_left_minus_right": float(np.median(values)),
+            "q1_left_minus_right": float(np.quantile(values, 0.25)),
+            "q3_left_minus_right": float(np.quantile(values, 0.75)),
+            "aggregation": "complete participant-side pairs within series; participant median and IQR; descriptive",
+        })
+
+    return {
+        "by_side_series": by_side_series,
+        "r1_r5_paired": r1_r5_paired,
+        "bilateral_paired": bilateral_paired,
+    }
+
+
 def analyze_cohort_arrays(
     recordings: Mapping[tuple[str, str, str], tuple[Iterable[float], Iterable[float]]],
     *,
@@ -493,11 +645,12 @@ def analyze_cohort_arrays(
     include_traces: bool = False,
     trace_key: tuple[str, str, str] | None = None,
 ) -> PipelineResult:
-    """Process independently keyed recordings without cohort-level comparisons.
+    """Process grouped recordings and add participant-level descriptive summaries.
 
     Keys are explicit ``(subject_id, side, series)`` tuples. The function only
-    aggregates export rows and structural counts; it does not create labels or
-    compare participants, sides, or series.
+    derives descriptive summaries from feature rows; it does not create labels
+    or perform validated fatigue inference. Overlapping windows are reduced to
+    recording medians before participant-level summaries and matched contrasts.
     """
 
     if not recordings:
@@ -555,6 +708,11 @@ def analyze_cohort_arrays(
             for row in getattr(group_result, field_name):
                 target_rows.append({"subject_id": subject_id, "side": side, **row})
 
+    cohort_summaries = summarize_cohort_features(tagged.feature_rows)
+    tagged.cohort_by_side_series_rows = cohort_summaries["by_side_series"]
+    tagged.cohort_r1_r5_rows = cohort_summaries["r1_r5_paired"]
+    tagged.cohort_bilateral_rows = cohort_summaries["bilateral_paired"]
+
     first_summary = group_summaries[0]
     tagged.summary = {
         **first_summary,
@@ -571,10 +729,17 @@ def analyze_cohort_arrays(
         "fft_rows": len(tagged.fft_rows),
         "psd_rows": len(tagged.psd_rows),
         "stft_rows": len(tagged.stft_rows),
-        "cohort_comparisons_computed": False,
+        "cohort_comparisons_computed": True,
+        "cohort_summary_rows": len(tagged.cohort_by_side_series_rows),
+        "cohort_r1_r5_paired_rows": len(tagged.cohort_r1_r5_rows),
+        "cohort_bilateral_paired_rows": len(tagged.cohort_bilateral_rows),
+        "cohort_summary_method": (
+            "overlapping windows reduced to one median per recording; cohort medians and IQRs use participants; "
+            "R1-R5 and left-right summaries use complete within-participant pairs"
+        ),
         "data_scope": (
-            "caller-supplied grouped CSV; independent signal processing only; "
-            "no fatigue labels or cross-subject, cross-side, or cross-series comparisons"
+            "caller-supplied grouped CSV; descriptive participant-level summaries by side and series plus matched "
+            "R1-R5 and bilateral comparisons; no fatigue labels, activity mask, or validated fatigue inference"
         ),
     }
     return tagged
@@ -786,6 +951,14 @@ def _ensure_output_dir(path: Path, *, overwrite: bool) -> Path:
 
 def write_result(result: PipelineResult, output_dir: Path) -> None:
     output_dir = Path(output_dir)
+    is_cohort = result.summary.get("analysis_mode") == "grouped_cohort_csv"
+    if not is_cohort:
+        for name in (
+            "cohort_by_side_series.csv",
+            "cohort_r1_r5_paired.csv",
+            "cohort_bilateral_paired.csv",
+        ):
+            (output_dir / name).unlink(missing_ok=True)
     for name, columns, rows in (
         ("segments.csv", SEGMENT_COLUMNS, result.segment_rows),
         ("mask.csv", MASK_COLUMNS, result.mask_rows),
@@ -794,9 +967,25 @@ def write_result(result: PipelineResult, output_dir: Path) -> None:
         ("psd.csv", PSD_COLUMNS, result.psd_rows),
         ("stft.csv", STFT_COLUMNS, result.stft_rows),
     ):
-        if result.summary.get("analysis_mode") == "grouped_cohort_csv":
+        if is_cohort:
             columns = COHORT_PREFIX_COLUMNS + columns
         _write_csv(output_dir / name, columns, rows)
+    if is_cohort:
+        _write_csv(
+            output_dir / "cohort_by_side_series.csv",
+            COHORT_SUMMARY_COLUMNS,
+            result.cohort_by_side_series_rows,
+        )
+        _write_csv(
+            output_dir / "cohort_r1_r5_paired.csv",
+            COHORT_R1_R5_COLUMNS,
+            result.cohort_r1_r5_rows,
+        )
+        _write_csv(
+            output_dir / "cohort_bilateral_paired.csv",
+            COHORT_BILATERAL_COLUMNS,
+            result.cohort_bilateral_rows,
+        )
     if result.summary.get("dashboard_exported"):
         identity_fields = {"subject_id", "participant_id"}
         traces = [{key: value for key, value in row.items() if key not in identity_fields} for row in result.trace_rows]
@@ -821,6 +1010,7 @@ def write_result(result: PipelineResult, output_dir: Path) -> None:
     else:
         # Keep the known output set deterministic even when the dashboard is disabled.
         _write_csv(output_dir / "activity_candidates.csv", ACTIVITY_CANDIDATE_COLUMNS, [])
+        (output_dir / "dashboard.html").unlink(missing_ok=True)
     (output_dir / "summary.json").write_text(
         json.dumps(result.summary, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
         encoding="utf-8",
@@ -899,7 +1089,8 @@ def main(argv: list[str] | None = None) -> int:
             result.summary["sample_count"] = sum(len(times) for times, _ in recordings.values())
             result.summary["data_scope"] = (
                 "caller-supplied grouped CSV fragments reassembled by pseudonymized group and original timestamps; "
-                "independent signal processing only; no fatigue labels or cross-subject, cross-side, or cross-series comparisons"
+                "descriptive participant-level summaries by side and series plus matched R1-R5 and bilateral comparisons; "
+                "no fatigue labels, activity mask, or validated fatigue inference"
             )
         elif args.cohort_input is not None:
             result = analyze_cohort_arrays(read_cohort_signal_csv(selected_inputs[0]), include_traces=args.dashboard, trace_key=trace_key)
@@ -915,8 +1106,8 @@ def main(argv: list[str] | None = None) -> int:
     if not args.demo and (args.cohort_input is not None or args.cohort_fragments is not None):
         if args.cohort_fragments is None:
             result.summary["data_scope"] = (
-                "caller-supplied grouped CSV; independent signal processing only; "
-                "no fatigue labels or cross-subject, cross-side, or cross-series comparisons"
+                "caller-supplied grouped CSV; descriptive participant-level summaries by side and series plus matched "
+                "R1-R5 and bilateral comparisons; no fatigue labels, activity mask, or validated fatigue inference"
             )
     if args.dashboard:
         result.summary["dashboard_exported"] = True
