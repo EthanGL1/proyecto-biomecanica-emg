@@ -1,10 +1,10 @@
 # Auditoría del paquete público EMG — estado verificado al 20 de octubre de 2026
 
-**Estado de liberación:** intermedio, sin señales privadas en el paquete y todavía no final científico. Este checkout parte de `origin/main` `da04af2cbc653a6849726b4b9119af0f3474cd41`; el manifiesto y las verificaciones descritas corresponden al árbol candidato de esta actualización. Los SHAs `a9a…` y `c6f…` que aparecen en párrafos históricos identifican snapshots anteriores; el SHA remoto vigente se registra en la verificación de entrega.
+**Estado de liberación:** intermedio, sin señales privadas en el paquete y todavía no final científico. Este checkout parte de `origin/main` `da04af2cbc653a6849726b4b9119af0f3474cd41`. La actualización de código y pruebas se publicó en `1937a53f5bd780b9592ae216ed2b3a0f5888743b`; después del envío, `git ls-remote` coincidió con ese SHA. Esta auditoría se actualiza con los resultados de esa publicación. Los SHAs `a9a…` y `c6f…` de párrafos históricos identifican snapshots anteriores.
 
 ## Alcance y privacidad
 
-La auditoría remota anterior no encontró señales EMG, `participants.csv`, salidas por sujeto, predicciones privadas, etiquetas/fenotipos individuales, datos Cerqueira ni checkpoints restringidos. Ese snapshot histórico tenía 39 archivos de carga útil. Para la actualización local preparada, el manifiesto SHA-256 enumera 47 archivos de carga útil (excluye el propio manifiesto) y sus 47 hashes coinciden con los blobs del índice. Los archivos agregados ahora siguen limitados a código, pruebas sintéticas y documentación; la lista de cambios preparada no incluye datos ni checkpoints.
+La auditoría remota anterior no encontró señales EMG, `participants.csv`, salidas por sujeto, predicciones privadas, etiquetas/fenotipos individuales, datos Cerqueira ni checkpoints restringidos. Ese snapshot histórico tenía 39 archivos de carga útil. El paquete de código publicado incluye 47 archivos de carga útil; los 47 hashes del manifiesto coinciden con los blobs del commit `1937a53f5bd780b9592ae216ed2b3a0f5888743b`. La inspección del cambio publicado confirma que solo agrega código, pruebas sintéticas y documentación; no se incluyen datos ni checkpoints.
 
 ## Comprobaciones reproducibles
 
