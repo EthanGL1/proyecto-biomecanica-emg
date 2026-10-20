@@ -45,6 +45,9 @@ FIXTURE_GAP_S = 0.010
 FIXTURE_SEED = 20261019
 
 INPUT_COLUMNS = ("series", "time_s", "adc_value")
+SOURCE_TIME_COLUMN = "Relative_Time_s"
+SOURCE_SIGNAL_COLUMN = "ADC_Value"
+SOURCE_OPTIONAL_COLUMNS = ("Voltage_mV",)
 COHORT_INPUT_COLUMNS = ("subject_id", "side", "series", "time_s", "adc_value")
 SIDES = ("left", "right")
 COHORT_PREFIX_COLUMNS = ("subject_id", "side")
@@ -745,19 +748,55 @@ def analyze_cohort_arrays(
     return tagged
 
 
-def read_signal_csv(path: Path) -> dict[str, tuple[np.ndarray, np.ndarray]]:
-    """Read a strict three-column CSV; reject identity or other metadata fields."""
+def read_signal_csv(
+    path: Path,
+    *,
+    series_override: str | None = None,
+) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Read canonical CSV or an explicit local-source schema without identity fields.
+
+    The source schema uses ``Relative_Time_s`` and ``ADC_Value``. ``Voltage_mV``
+    is optional and ignored because its physical calibration is undocumented.
+    Since that schema has no series column, callers must supply an explicit
+    R1-R5 ``series_override``; series values are never inferred from filenames.
+    """
 
     recordings: dict[str, tuple[list[float], list[float]]] = {}
     seen_series: set[str] = set()
     previous_series: str | None = None
+    previous_time_by_series: dict[str, float] = {}
     with Path(path).open("r", newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
         fields = reader.fieldnames or []
-        if len(fields) != len(set(fields)) or set(fields) != set(INPUT_COLUMNS):
-            raise ValueError("input CSV columns must be exactly series,time_s,adc_value")
+        if len(fields) != len(set(fields)):
+            raise ValueError("input CSV contains duplicate column names")
+        field_set = set(fields)
+        source_required = {SOURCE_TIME_COLUMN, SOURCE_SIGNAL_COLUMN}
+        source_allowed = (source_required, source_required | set(SOURCE_OPTIONAL_COLUMNS))
+        is_canonical = field_set == set(INPUT_COLUMNS)
+        is_source = field_set in source_allowed
+        if not is_canonical and not is_source:
+            raise ValueError(
+                "input CSV columns must be exactly series,time_s,adc_value or "
+                "Relative_Time_s,ADC_Value with optional Voltage_mV"
+            )
+        if is_source and series_override is None:
+            raise ValueError("source-schema CSV has no series column; pass an explicit --series R1-R5")
+        if is_canonical and series_override is not None:
+            raise ValueError("--series is only for source-schema CSV without a series column")
+        if series_override is not None and series_override not in SERIES:
+            raise ValueError("series must be R1-R5")
+        time_column = "time_s" if is_canonical else SOURCE_TIME_COLUMN
+        signal_column = "adc_value" if is_canonical else SOURCE_SIGNAL_COLUMN
         for line_number, row in enumerate(reader, start=2):
-            series = str(row["series"]).strip()
+            if None in row:
+                raise ValueError(f"unexpected extra field on CSV line {line_number}")
+            required_row_fields = ("series", time_column, signal_column) if is_canonical else (time_column, signal_column)
+            if any(row.get(field) is None for field in required_row_fields):
+                raise ValueError(f"missing field on CSV line {line_number}")
+            if not row[time_column].strip() or not row[signal_column].strip():
+                raise ValueError(f"missing required sample value on CSV line {line_number}")
+            series = str(row["series"]).strip() if is_canonical else str(series_override)
             if series not in SERIES:
                 raise ValueError("series values must be R1-R5")
             if series != previous_series:
@@ -766,12 +805,18 @@ def read_signal_csv(path: Path) -> dict[str, tuple[np.ndarray, np.ndarray]]:
                 seen_series.add(series)
                 previous_series = series
             try:
-                time_s = float(row["time_s"])
-                adc_value = float(row["adc_value"])
+                time_s = float(row[time_column])
+                adc_value = float(row[signal_column])
             except (TypeError, ValueError) as error:
                 raise ValueError(f"invalid numeric value on CSV line {line_number}") from error
             if not math.isfinite(time_s) or not math.isfinite(adc_value):
                 raise ValueError(f"CSV values must be finite on line {line_number}")
+            previous_time = previous_time_by_series.get(series)
+            if previous_time is not None and time_s <= previous_time:
+                if time_s == previous_time:
+                    raise ValueError(f"duplicate sample timestamp within series {series}")
+                raise ValueError(f"timestamps must increase strictly within series {series}")
+            previous_time_by_series[series] = time_s
             if series not in recordings:
                 recordings[series] = ([], [])
             recordings[series][0].append(time_s)
@@ -1018,9 +1063,24 @@ def write_result(result: PipelineResult, output_dir: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Esquemas para --input:\n"
+            "  Canonico: series,time_s,adc_value\n"
+            "  Fuente local: Relative_Time_s,ADC_Value[,Voltage_mV]; requiere --series R1-R5.\n"
+            "  Voltage_mV se ignora; no se asume calibracion fisica.\n\n"
+            "Ejemplo publico sintetico (no usa grabaciones del estudio):\n"
+            "  python src\\reproducir_emg_referencia.py --demo --output-dir <PRIVATE_TEMP> --overwrite"
+        ),
+    )
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--input", type=Path, help="CSV with only series,time_s,adc_value columns")
+    source.add_argument(
+        "--input",
+        type=Path,
+        help="single-record CSV using the canonical or explicit local-source schema",
+    )
     source.add_argument(
         "--cohort-input",
         type=Path,
@@ -1034,12 +1094,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     source.add_argument("--demo", action="store_true", help="create and process deterministic synthetic R1-R5 data")
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--series",
+        choices=SERIES,
+        help="required for source-schema --input CSVs without a series column; never inferred from a filename",
+    )
     parser.add_argument("--overwrite", action="store_true", help="allow replacing outputs in an existing directory")
     parser.add_argument("--dashboard", action="store_true", help="write a local interactive HTML viewer; cohort mode requires one selected group")
     parser.add_argument("--dashboard-subject", help="subject pseudonym to show in the dashboard for cohort inputs")
     parser.add_argument("--dashboard-side", choices=SIDES, help="side to show in the dashboard for cohort inputs")
     parser.add_argument("--dashboard-series", choices=SERIES, help="series to show in the dashboard for cohort inputs")
     args = parser.parse_args(argv)
+    if args.series is not None and args.input is None:
+        parser.error("--series can only be used with --input")
     dashboard_selection = (args.dashboard_subject, args.dashboard_side, args.dashboard_series)
     if any(value is not None for value in dashboard_selection):
         if not args.dashboard or args.cohort_input is None and args.cohort_fragments is None:
@@ -1096,7 +1163,10 @@ def main(argv: list[str] | None = None) -> int:
             result = analyze_cohort_arrays(read_cohort_signal_csv(selected_inputs[0]), include_traces=args.dashboard, trace_key=trace_key)
             result.summary["input_source"] = "cohort_csv"
         else:
-            result = analyze_arrays(read_signal_csv(selected_inputs[0]), include_traces=args.dashboard)
+            result = analyze_arrays(
+                read_signal_csv(selected_inputs[0], series_override=args.series),
+                include_traces=args.dashboard,
+            )
             result.summary["input_source"] = "csv_input"
             result.summary["data_scope"] = (
                 "caller-supplied CSV without identity columns; single-recording processing only; "

@@ -228,6 +228,89 @@ class PublicEmgPipelineTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "R1-R5"):
                 read_signal_csv(source)
 
+    def test_original_signal_columns_require_explicit_series_and_ignore_optional_voltage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "recording_named_R5.csv"
+            output = Path(temporary) / "processed"
+            fs_hz = 1000.0
+            times = np.arange(6000, dtype=float) / fs_hz
+            signal = 30.0 * np.sin(2.0 * np.pi * 80.0 * times)
+            with source.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(("Relative_Time_s", "ADC_Value", "Voltage_mV"))
+                writer.writerow((f"{times[0]:.9f}", f"{signal[0]:.12f}"))
+                writer.writerows((f"{time_s:.9f}", f"{value:.12f}", "not-a-calibrated-voltage")
+                                 for time_s, value in zip(times[1:], signal[1:]))
+
+            with self.assertRaisesRegex(ValueError, "explicit --series"):
+                main(["--input", str(source), "--output-dir", str(output)])
+            self.assertFalse(output.exists())
+
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(
+                        main(["--input", str(source), "--series", "R3", "--output-dir", str(output)]),
+                        0,
+                    )
+            except SystemExit as raised:
+                self.fail(f"CLI did not accept the explicit --series option (exit {raised.code})")
+            with (output / "summary.json").open(encoding="utf-8") as handle:
+                summary = json.load(handle)
+            self.assertEqual(summary["series"], ["R3"])
+            self.assertEqual(summary["runs_processed"], 1)
+            self.assertEqual(summary["fatigue_target"], "none; elapsed-time thirds are a position proxy only")
+
+    def test_original_signal_schema_rejects_ambiguous_duplicate_missing_and_invalid_rows(self):
+        invalid_sources = (
+            ("Relative_Time_s,ADC_Value,ADC_Value\n0,1,2\n", "duplicate"),
+            ("Relative_Time_s,Voltage_mV\n0,1\n", "columns"),
+            ("series,time_s,adc_value,Relative_Time_s,ADC_Value\nR1,0,1,0,1\n", "columns"),
+            ("Relative_Time_s,ADC_Value,Voltage_mV,participant_id\n0,1,2,subject\n", "columns"),
+            ("Relative_Time_s,ADC_Value\n0\n", "missing"),
+            ("Relative_Time_s,ADC_Value\n0,\n", "missing"),
+            ("Relative_Time_s,ADC_Value\n0,1,extra\n", "extra"),
+            ("Relative_Time_s,ADC_Value\n0,invalid\n", "numeric"),
+            ("Relative_Time_s,ADC_Value\n0,nan\n", "finite"),
+            ("Relative_Time_s,ADC_Value\n0,1\n0,2\n", "duplicate sample timestamp"),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source.csv"
+            for contents, expected_error in invalid_sources:
+                with self.subTest(expected_error=expected_error, contents=contents):
+                    output = Path(temporary) / f"output_{len(contents)}"
+                    source.write_text(contents, encoding="utf-8")
+                    try:
+                        with self.assertRaisesRegex(ValueError, expected_error):
+                            main(["--input", str(source), "--series", "R2", "--output-dir", str(output)])
+                    except SystemExit as raised:
+                        self.fail(f"CLI rejected --series before validating source input (exit {raised.code})")
+                    self.assertFalse(output.exists())
+
+    def test_original_signal_cli_rejects_invalid_series_before_creating_outputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source.csv"
+            source.write_text("Relative_Time_s,ADC_Value\n0,1\n0.001,2\n", encoding="utf-8")
+            output = Path(temporary) / "invalid_series_output"
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as raised:
+                    main(["--input", str(source), "--series", "R0", "--output-dir", str(output)])
+            self.assertEqual(raised.exception.code, 2)
+            self.assertIn("invalid choice: 'R0'", stderr.getvalue())
+            self.assertFalse(output.exists())
+
+    def test_canonical_single_signal_input_rejects_a_redundant_series_override(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "canonical.csv"
+            source.write_text("series,time_s,adc_value\nR1,0,1\nR1,0.001,2\n", encoding="utf-8")
+            output = Path(temporary) / "output"
+            try:
+                with self.assertRaisesRegex(ValueError, "only for source-schema CSV"):
+                    main(["--input", str(source), "--series", "R1", "--output-dir", str(output)])
+            except SystemExit as raised:
+                self.fail(f"CLI rejected --series before validating canonical schema (exit {raised.code})")
+            self.assertFalse(output.exists())
+
     def test_cohort_reader_accepts_explicit_subject_side_series_groups(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "cohort.csv"
