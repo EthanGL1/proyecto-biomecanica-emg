@@ -61,6 +61,17 @@ $privateOut = Join-Path $env:LOCALAPPDATA 'EMG_Biomecanica\emg_referencia'
 python src\reproducir_emg_referencia.py --input '<CSV_WITHOUT_ID_COLUMNS>' --output-dir $privateOut
 ```
 
+### Entrada tabular de grabaciones agrupadas
+
+Hay un modo separado para quien ya disponga de un CSV de cohorte con IDs seudonimizados. Su contrato requiere exactamente las columnas `subject_id`, `side`, `series`, `time_s` y `adc_value`, en cualquier orden; `side` debe ser `left` o `right` y `series`, `R1`–`R5`. Cada combinación `(subject_id, side, series)` debe ocupar un solo bloque contiguo y sus marcas `time_s` deben aumentar estrictamente. El lector rechaza IDs vacíos o con espacios externos, valores de lateralidad/serie no válidos, bloques repetidos, marcas duplicadas o reinicios del reloj. Cada grupo debe producir al menos una ventana completa de 1 s después de aplicar la máscara común de bordes; si no, se detiene antes de escribir resultados.
+
+```powershell
+$privateOut = Join-Path $env:LOCALAPPDATA 'EMG_Biomecanica\emg_referencia_cohorte'
+python src\reproducir_emg_referencia.py --cohort-input '<ANONYMIZED_COHORT_CSV>' --output-dir $privateOut
+```
+
+El modo procesa cada grupo de forma independiente y añade `subject_id` y `side` a sus tablas de salida para conservar la clave `(subject_id, side, series)`. Solo resume conteos estructurales; no crea etiquetas de fatiga ni calcula comparaciones entre personas, lados o series. Todos los CSV de salida contienen resultados a nivel de señal/ventana y deben mantenerse en almacenamiento restringido. La herramienta no puede verificar que un ID sea realmente anónimo, que las etiquetas coincidan con la identidad real de la grabación o que el CSV cumpla otros metadatos de adquisición. Como el contrato no tiene un identificador de grabación independiente, no puede detectar si una nueva combinación de claves representa una etiqueta equivocada; debe confirmarse antes de preparar el CSV. Se ejecutó una prueba de humo con un único registro formal real, cuyo SHA-256 se enlazó con el manifiesto privado; esto comprueba el lector y el procesador para ese registro, pero no valida un lote de 138 grabaciones ni todas las 15 personas. La entrada de una sola señal `--input` conserva su esquema estricto de tres columnas y no acepta IDs.
+
 Para entradas de señales reales, conserva el CSV y todas las salidas en almacenamiento local autorizado y restringido. La herramienta impide escribir dentro del checkout, pero no detecta carpetas sincronizadas por otros servicios. No publiques los resultados a nivel de ventana o serie.
 
 El flujo estima la frecuencia por la mediana de los intervalos temporales, separa gaps mayores que `max(1,5 ms, 1,5 × mediana del intervalo) + 1 ns` sin interpolar y omite tramos con dispersión temporal p95–p5 superior al 5 %. Requiere frecuencia estimada mayor de 800 Hz para la rama de 20–400 Hz y no remuestrea. Compara señal de control, HP20, HP40 y BP20–400 Butterworth de cuarto orden en fase cero, y BP20–400 FIR Hamming de 101 coeficientes. Una máscara común excluye los bordes de todos los filtros; sobre muestras válidas calcula ventanas Hann de 1 s con 50 % de solapamiento, RMS, MDF y MNF entre 20 y 400 Hz, FFT unilateral, PSD promedio y STFT. El archivo `features.csv` incluye tercios de posición temporal (`temprana`, `transicion`, `tardia`), que son un proxy de tiempo y no clases de fatiga.
@@ -80,3 +91,4 @@ No hay entradas ni evaluación de Borg/RPE en el paquete. Tampoco se publica un 
 No se verificaron modalidad RAW/RECT/ENV, frecuencia física del equipo, calibración, sitio muscular, carga, pausas, cadencia o repeticiones mecánicas. La columna local `Voltage_mV` no está validada como voltaje físico. Por tanto, esta investigación describe tendencias del canal guardado y desempeño de una tarea proxy, no impacto de un grupo muscular específico ni fatiga confirmada.
 
 No se agregó una licencia: no se han verificado los derechos para otorgarla. El acceso a datos sigue sujeto a autorización, consentimiento y aprobación ética aplicable.
+
