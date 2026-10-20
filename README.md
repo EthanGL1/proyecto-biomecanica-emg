@@ -1,12 +1,14 @@
-# Análisis EMG — estado público F48
+# Análisis EMG — paquete público seguro F50 (intermedio)
 
-**Actualización intermedia del 20 de octubre de 2026.** Este paquete reúne código de procesamiento, pruebas, bibliografía y resultados agregados permitidos. La versión del informe DOCX/PDF F31 que permanece en `reports/` es histórica y corresponde a un benchmark de posición temporal; no es el manuscrito F48 ni una versión final del estudio.
+**Actualización intermedia del 20 de octubre de 2026.** Este paquete reúne código de procesamiento, pruebas, bibliografía y resultados agregados permitidos. El informe DOCX/PDF F31 que permanece en `reports/` es histórico y corresponde a un benchmark de posición temporal; no es el manuscrito LaTeX F49 ni una versión final del estudio.
 
-El análisis fisiológico principal usa las grabaciones locales de cuádriceps. No hay etiquetas independientes de fatiga funcional, fuerza/torque sincronizados, repeticiones verificadas ni calibración física del canal, por lo que no se presenta un detector local de fatiga. El benchmark Borg es un experimento separado de esfuerzo percibido en EMG de hombro. El experimento ordinal de Cerqueira es una tercera rama independiente de fatiga autopercibida de miembro superior y todavía no tiene un corpus EMG alineado ni un modelo entrenado y verificado.
+El [corte de estado F50](reports/F50_STATUS_20261020.md) detalla las verificaciones actuales, el alcance de cada rama y los bloqueos que siguen abiertos.
+
+El análisis fisiológico principal usa las grabaciones locales de cuádriceps. No hay etiquetas independientes de fatiga funcional, fuerza/torque sincronizados, repeticiones verificadas ni calibración física del canal, por lo que no se presenta un detector local de fatiga. El benchmark Borg es un experimento separado de esfuerzo percibido en EMG de hombro. Cerqueira es una tercera rama para auto-reporte ordinal de fatiga de miembro superior: corpus, LOSO y una inferencia retenida están verificados localmente, pero el baseline temporal supera al predictor EMG y no se recomienda un modelo EMG para despliegue.
 
 Este paquete público no contiene señales, HTML con señales embebidas, resultados por participante/ventana, datos de identificación, checkpoints ni inferencias individuales. El modelo Borg congelado no se publica: el SHA está auditado, pero la carga e inferencia reproducibles siguen sin demostrarse en un runtime autorizado.
 
-## Resultados consolidados F48
+## Resultados consolidados F50
 
 El inventario local contiene 140 grabaciones de 15 grupos derivados de nombres de archivo; 138 registros formales R1–R5 sustentan el análisis descriptivo y dos registros R0/R0_1 se conservaron solo para control de calidad. Hay 27 pares emparejables de participante y pierna para R1 frente a R5. En esos pares, el cambio mediano fue RMS +31,27 % (IC del 95 %: 5,11 a 40,04), MDF +1,45 Hz (−4,49 a 2,22) y MNF −2,06 Hz (−6,56 a 1,00). Los intervalos espectrales incluyen cero: no se observó una reducción de MDF/MNF consistente en el conjunto. Estos son cambios eléctricos descriptivos, no niveles ni eventos confirmados de fatiga.
 
@@ -14,7 +16,7 @@ Se auditaron 2.102 candidatos de activación; no están sincronizados con marcad
 
 El benchmark separado de Borg incluye 34 participantes y 1.309 ventanas OOF para RPE ≥17. El procedimiento de selección anidada agrupada por participante obtuvo macro-F1 agrupado 0,6176 y macro-F1 medio por participante 0,5787 (DE 0,1344). Mide esfuerzo percibido alto en el protocolo de hombro, no fatiga fisiológica de cuádriceps. El checkpoint Borg no ha producido aún una predicción reproducible.
 
-La rama Cerqueira conserva su objetivo como fatiga autopercibida ordinal de miembro superior (0/1/2). La recuperación del archivo crudo y la sincronización ensayo-etiqueta permanecen en verificación; no se informa entrenamiento, métrica ni validación hasta cerrar tamaño, checksum y alineación.
+La rama Cerqueira conserva su objetivo como fatiga autopercibida ordinal de miembro superior (0/1/2). Los ZIP oficiales de señal y etiquetas coinciden con los checksums del registro Zenodo; se emparejaron 13 participantes y 156 ensayos, con 34 ensayos que contienen marcas no monótonas y 9 ensayos/11 filas con discordancias entre canales. El LOSO primario (≥90 % de cobertura por ensayo) incluye 146 ensayos y 44.886 ventanas; la sensibilidad ≥95 % incluye 143 ensayos y 44.428 ventanas. Macro-F1 medio por participante fue 0,368 (IC95 % 0,319–0,415) para EMG frente a 0,713 (0,666–0,755) para el baseline temporal. Las etiquetas son fuertemente crecientes con el tiempo (Spearman medio por ensayo 0,9022). El checkpoint de pliegue retenido produjo 223 predicciones reproducibles sobre un ensayo real sin usar etiquetas. Es validación interna dentro del mismo dataset; no es una prueba externa ni un detector de pérdida funcional o de fatiga de cuádriceps. Los datos, artefactos y predicciones granulares permanecen restringidos y no forman parte de este repositorio.
 
 La edición F48 del manuscrito conserva los 44 registros bibliográficos y la estructura del template docente. El validador estructural confirma las secciones requeridas, citas, tablas y figuras; la compilación IEEE sigue pendiente porque no está disponible la distribución Tectonic requerida y no hay motor TeX local verificado. No se declara un PDF ni una extensión de páginas como completados.
 
