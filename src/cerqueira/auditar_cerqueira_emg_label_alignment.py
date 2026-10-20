@@ -36,6 +36,42 @@ _SUBJECT_RE = re.compile(r"(?:^|/)subject_(\d+)\.zip$", re.IGNORECASE)
 _TRIAL_RE = re.compile(r"(?:^|/)subject_(\d+)/trial_(\d+)\.csv$", re.IGNORECASE)
 _TIME_COLUMN_RE = re.compile(r"^x\s*\[s\](?:\.\d+)?$", re.IGNORECASE)
 
+# Generous limits sized above the checked official corpus. They bound archive
+# expansion and row accumulation for other inputs accepted by this public CLI.
+MAX_ARCHIVE_FILE_BYTES = 8 * 1024**3
+MAX_ARCHIVE_MEMBERS = 10_000
+MAX_ARCHIVE_MEMBER_BYTES = 512 * 1024**2
+MAX_ARCHIVE_TOTAL_UNCOMPRESSED_BYTES = 8 * 1024**3
+MAX_ARCHIVE_COMPRESSION_RATIO = 10_000.0
+MAX_SIGNAL_ROWS = 1_000_000
+MAX_LABEL_ROWS = 1_000_000
+
+
+def _validate_archive_path(path: Path) -> None:
+    try:
+        size = path.stat().st_size
+    except OSError as error:
+        raise AlignmentAuditError("Cannot inspect archive file size") from error
+    if size > MAX_ARCHIVE_FILE_BYTES:
+        raise AlignmentAuditError("Archive exceeds configured resource limit")
+
+
+def _validate_zip_members(infos: list[zipfile.ZipInfo]) -> None:
+    if len(infos) > MAX_ARCHIVE_MEMBERS:
+        raise AlignmentAuditError("Archive exceeds configured resource limit: member count")
+    total_uncompressed = 0
+    for info in infos:
+        if info.is_dir():
+            continue
+        if info.file_size < 0 or info.file_size > MAX_ARCHIVE_MEMBER_BYTES:
+            raise AlignmentAuditError("Archive exceeds configured resource limit: member size")
+        total_uncompressed += info.file_size
+        ratio = info.file_size / max(info.compress_size, 1)
+        if ratio > MAX_ARCHIVE_COMPRESSION_RATIO:
+            raise AlignmentAuditError("Archive exceeds configured resource limit: compression ratio")
+    if total_uncompressed > MAX_ARCHIVE_TOTAL_UNCOMPRESSED_BYTES:
+        raise AlignmentAuditError("Archive exceeds configured resource limit: expanded size")
+
 
 def _spreadsheet_safe_cell(value: object) -> object:
     """Keep untrusted strings inert when a CSV is opened in a spreadsheet."""
@@ -75,8 +111,13 @@ def _quantile(values: list[float], q: float) -> float | None:
 
 def _outer_subject_entries(path: Path) -> dict[int, zipfile.ZipInfo]:
     entries: dict[int, zipfile.ZipInfo] = {}
+    _validate_archive_path(path)
     with zipfile.ZipFile(path) as outer:
-        for info in outer.infolist():
+        infos = outer.infolist()
+        _validate_zip_members(infos)
+        for info in infos:
+            if info.is_dir():
+                continue
             match = _SUBJECT_RE.search(info.filename)
             if not match:
                 continue
@@ -93,7 +134,11 @@ def _nested_trial_entries(
     nested: zipfile.ZipFile, subject_id: int
 ) -> dict[int, zipfile.ZipInfo]:
     entries: dict[int, zipfile.ZipInfo] = {}
-    for info in nested.infolist():
+    infos = nested.infolist()
+    _validate_zip_members(infos)
+    for info in infos:
+        if info.is_dir():
+            continue
         match = _TRIAL_RE.search(info.filename)
         if not match:
             continue
@@ -137,6 +182,8 @@ def _read_signal_csv(stream: BinaryIO) -> dict[str, object]:
         channel_time_mismatch_details: list[dict[str, object]] = []
         previous_time_values: list[float] | None = None
         for row_index, row in enumerate(reader):
+            if row_index >= MAX_SIGNAL_ROWS:
+                raise AlignmentAuditError("sEMG CSV exceeds configured row limit")
             if len(row) != len(header):
                 malformed_rows += 1
                 continue
@@ -245,7 +292,9 @@ def _read_label_csv(stream: BinaryIO) -> dict[str, object]:
         times: list[float] = []
         labels: list[int] = []
         malformed_rows = 0
-        for row in reader:
+        for row_index, row in enumerate(reader):
+            if row_index >= MAX_LABEL_ROWS:
+                raise AlignmentAuditError("Fatigue-label CSV exceeds configured row limit")
             try:
                 time_s = float(row["time"])
                 label = int(row["label"])
@@ -815,7 +864,17 @@ def main() -> None:
             expected_label_md5=args.expected_label_md5,
         )
     write_report(report, args.output_json, args.output_csv, protected_paths=protected_paths)
-    print(json.dumps(report["summary"], indent=2, ensure_ascii=False))
+    summary = report["summary"]
+    safe_summary = {
+        "status": "complete",
+        "emg_subject_count": summary["emg_subject_count"],
+        "label_subject_count": summary["label_subject_count"],
+        "matched_subject_count": summary["matched_subject_count"],
+        "matched_trial_count": summary["matched_trial_count"],
+        "pairing_complete": summary["pairing_complete"],
+        "timestamp_overlap_complete_trials": summary["timestamp_overlap_complete_trials"],
+    }
+    print(json.dumps(safe_summary, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

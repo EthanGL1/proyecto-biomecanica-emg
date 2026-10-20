@@ -15,6 +15,7 @@ import math
 from pathlib import Path
 from typing import Any
 import sys
+import zipfile
 
 import numpy as np
 import pandas as pd
@@ -27,6 +28,15 @@ from output_safety import PublicCheckoutOutputError, ensure_outside_public_check
 
 CLASSES = np.array([0, 1, 2], dtype=np.int64)
 DEFAULT_REGULARIZATIONS = (0.01, 0.1, 1.0)
+MAX_MODEL_FILE_BYTES = 64 * 1024**2
+MAX_MODEL_UNCOMPRESSED_BYTES = 64 * 1024**2
+MAX_MODEL_MEMBERS = 32
+MAX_MODEL_FEATURES = 512
+MAX_MODEL_MANIFEST_BYTES = 4 * 1024**2
+MAX_MODEL_ABSOLUTE_VALUE = 1e12
+MAX_FEATURE_CSV_BYTES = 512 * 1024**2
+MAX_FEATURE_ROWS = 250_000
+MAX_FEATURE_SUMMARY_BYTES = 4 * 1024**2
 
 
 class CerqueiraModelError(ValueError):
@@ -36,6 +46,27 @@ class CerqueiraModelError(ValueError):
 def write_precision_csv(frame: pd.DataFrame, path: str | Path) -> None:
     """Write numeric outputs at enough precision for a binary64 round trip."""
     frame.to_csv(Path(path), index=False, float_format="%.17g")
+
+
+def _sha256_file_limited(path: Path, max_bytes: int) -> str:
+    """Hash a file incrementally, enforcing the byte ceiling while reading."""
+    try:
+        if path.stat().st_size > max_bytes:
+            raise CerqueiraModelError("Feature CSV exceeds configured size limit")
+        digest = hashlib.sha256()
+        bytes_read = 0
+        with path.open("rb") as stream:
+            while True:
+                block = stream.read(min(8 * 1024 * 1024, max_bytes - bytes_read + 1))
+                if not block:
+                    break
+                bytes_read += len(block)
+                if bytes_read > max_bytes:
+                    raise CerqueiraModelError("Feature CSV exceeds configured size limit")
+                digest.update(block)
+        return digest.hexdigest()
+    except OSError as error:
+        raise CerqueiraModelError("Cannot read feature CSV") from error
 
 
 def fit_standardizer(x: np.ndarray) -> dict[str, np.ndarray]:
@@ -580,40 +611,176 @@ def _save_fold_model(
     np.savez_compressed(path, **arrays)
 
 
+def _validate_model_container(path: Path) -> None:
+    if path.stat().st_size > MAX_MODEL_FILE_BYTES:
+        raise CerqueiraModelError("Serialized model exceeds configured resource limit")
+    try:
+        with zipfile.ZipFile(path) as archive:
+            infos = archive.infolist()
+    except (OSError, zipfile.BadZipFile) as error:
+        raise CerqueiraModelError("Serialized model container is invalid") from error
+    if len(infos) > MAX_MODEL_MEMBERS:
+        raise CerqueiraModelError("Serialized model exceeds configured member-count limit")
+    if any(info.file_size > MAX_MODEL_UNCOMPRESSED_BYTES for info in infos):
+        raise CerqueiraModelError("Serialized model exceeds configured member-size limit")
+    if sum(info.file_size for info in infos) > MAX_MODEL_UNCOMPRESSED_BYTES:
+        raise CerqueiraModelError("Serialized model exceeds configured expanded-size limit")
+
+
+def _validated_model_array(
+    payload: Any, name: str, shape: tuple[int, ...], *, positive: bool = False
+) -> np.ndarray:
+    try:
+        values = np.asarray(payload[name])
+    except KeyError as error:
+        raise CerqueiraModelError(f"Serialized model is missing array: {name}") from error
+    if values.shape != shape or values.dtype.kind not in "fiu":
+        raise CerqueiraModelError(f"Serialized model array has an invalid shape or type: {name}")
+    values = values.astype(np.float64)
+    if not np.isfinite(values).all():
+        raise CerqueiraModelError(f"Serialized model array contains non-finite values: {name}")
+    if np.any(np.abs(values) > MAX_MODEL_ABSOLUTE_VALUE):
+        raise CerqueiraModelError(f"Serialized model array is outside the supported numeric range: {name}")
+    if positive and np.any(values <= 0):
+        raise CerqueiraModelError(f"Serialized model array must be positive: {name}")
+    return values
+
+
 def load_fold_model_bundle(model_path: str | Path, fold_manifest_path: str | Path) -> dict[str, Any]:
-    """Load one LOSO fold model only after manifest and SHA-256 verification."""
+    """Load a fold model after resource, structure, numeric, and checksum checks.
+
+    The checksum ties the supplied model bytes to the supplied manifest; it does
+    not authenticate who created either file.
+    """
     path, manifest_path = Path(model_path), Path(fold_manifest_path)
     if not path.is_file() or not manifest_path.is_file():
         raise CerqueiraModelError("Fold model and its manifest are required")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    entry = next((row for row in manifest.get("fold_models", []) if row.get("model_file") == path.name), None)
-    if entry is None:
+    if manifest_path.stat().st_size > MAX_MODEL_MANIFEST_BYTES:
+        raise CerqueiraModelError("Fold manifest exceeds configured resource limit")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise CerqueiraModelError("Fold manifest is not valid JSON") from error
+    if not isinstance(manifest, dict):
+        raise CerqueiraModelError("Fold manifest must be a JSON object")
+    feature_columns = manifest.get("feature_columns_ordered")
+    if (
+        not isinstance(feature_columns, list)
+        or not 1 <= len(feature_columns) <= MAX_MODEL_FEATURES
+        or any(not isinstance(name, str) or not name or len(name) > 256 for name in feature_columns)
+        or len(set(feature_columns)) != len(feature_columns)
+    ):
+        raise CerqueiraModelError("Fold manifest has an invalid feature-column contract")
+    feature_extraction = manifest.get("feature_extraction")
+    if not isinstance(feature_extraction, dict):
+        raise CerqueiraModelError("Fold manifest has no feature-extraction contract")
+    sampling_hz = feature_extraction.get("sampling_hz_median")
+    sampling_tolerance = feature_extraction.get("sampling_rate_relative_tolerance")
+    window_seconds = feature_extraction.get("window_seconds")
+    overlap_fraction = feature_extraction.get("window_overlap_fraction")
+    frequency_band = feature_extraction.get("frequency_band_hz")
+    fir_taps = feature_extraction.get("fir_taps")
+    numeric_contract = (sampling_hz, sampling_tolerance, window_seconds, overlap_fraction)
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value))
+           for value in numeric_contract):
+        raise CerqueiraModelError("Fold manifest feature-extraction numbers must be finite")
+    if (
+        sampling_hz <= 0
+        or not 0 <= sampling_tolerance < 0.25
+        or not 0 < window_seconds <= 60
+        or not 0 <= overlap_fraction < 1
+        or not isinstance(frequency_band, list)
+        or len(frequency_band) != 2
+        or any(isinstance(value, bool) or not isinstance(value, (int, float))
+               or not math.isfinite(float(value)) for value in frequency_band)
+        or not 0 < frequency_band[0] < frequency_band[1] < sampling_hz / 2
+        or isinstance(fir_taps, bool)
+        or not isinstance(fir_taps, int)
+        or fir_taps < 3
+        or fir_taps > 10_001
+        or fir_taps % 2 == 0
+    ):
+        raise CerqueiraModelError("Fold manifest feature-extraction values are outside supported ranges")
+    rows = manifest.get("fold_models")
+    if not isinstance(rows, list):
+        raise CerqueiraModelError("Fold manifest has no fold-model list")
+    matching_rows = [row for row in rows if isinstance(row, dict) and row.get("model_file") == path.name]
+    if len(matching_rows) != 1:
         raise CerqueiraModelError("Fold model is not listed in the supplied manifest")
+    entry = matching_rows[0]
+    expected_digest = entry.get("model_sha256")
+    if (
+        not isinstance(expected_digest, str)
+        or len(expected_digest) != 64
+        or any(character not in "0123456789abcdef" for character in expected_digest)
+    ):
+        raise CerqueiraModelError("Fold manifest model checksum is malformed")
+    _validate_model_container(path)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    if digest != entry.get("model_sha256"):
+    if digest != expected_digest:
         raise CerqueiraModelError("Fold model checksum differs from its manifest")
-    with np.load(path, allow_pickle=False) as payload:
-        family = str(payload["model_family"].item())
-        regularization = float(payload["regularization"].item())
-        transformer = {name: payload[name].astype(np.float64) for name in ("median", "mean", "scale")}
-        if family == "gaussian_nb":
-            model = {name: payload[name].astype(np.float64) for name in ("means", "variances", "priors")}
-        elif family == "softmax_l2":
-            model = {"coef": payload["coef"].astype(np.float64), "intercept": payload["intercept"].astype(np.float64)}
-        else:
-            raise CerqueiraModelError(f"Unknown serialized model family: {family}")
-        classes = payload["classes"].astype(np.int64)
+    feature_count = len(feature_columns)
+    try:
+        with np.load(path, allow_pickle=False) as payload:
+            family_value = np.asarray(payload["model_family"])
+            regularization_value = np.asarray(payload["regularization"])
+            classes_raw = np.asarray(payload["classes"])
+            if family_value.shape != () or family_value.dtype.kind not in "US":
+                raise CerqueiraModelError("Serialized model family marker is invalid")
+            if regularization_value.shape != () or regularization_value.dtype.kind not in "fiu":
+                raise CerqueiraModelError("Serialized model regularization marker is invalid")
+            family = str(family_value.item())
+            regularization = float(regularization_value.item())
+            if not math.isfinite(regularization) or abs(regularization) > MAX_MODEL_ABSOLUTE_VALUE:
+                raise CerqueiraModelError("Serialized model regularization is non-finite")
+            transformer = {
+                name: _validated_model_array(payload, name, (feature_count,), positive=name == "scale")
+                for name in ("median", "mean", "scale")
+            }
+            if classes_raw.shape != (len(CLASSES),) or classes_raw.dtype.kind not in "iu":
+                raise CerqueiraModelError("Serialized model class array has an invalid shape or type")
+            classes = classes_raw.astype(np.int64)
+            if family == "gaussian_nb":
+                model = {
+                    "means": _validated_model_array(payload, "means", (len(CLASSES), feature_count)),
+                    "variances": _validated_model_array(
+                        payload, "variances", (len(CLASSES), feature_count), positive=True
+                    ),
+                    "priors": _validated_model_array(payload, "priors", (len(CLASSES),), positive=True),
+                }
+                if not np.isclose(model["priors"].sum(), 1.0, rtol=0.0, atol=1e-8):
+                    raise CerqueiraModelError("Serialized Gaussian NB class priors do not sum to one")
+                if regularization >= 0:
+                    raise CerqueiraModelError("Serialized Gaussian NB regularization marker is inconsistent")
+            elif family == "softmax_l2":
+                model = {
+                    "coef": _validated_model_array(payload, "coef", (feature_count, len(CLASSES))),
+                    "intercept": _validated_model_array(payload, "intercept", (len(CLASSES),)),
+                }
+                if regularization < 0:
+                    raise CerqueiraModelError("Serialized softmax regularization is invalid")
+            else:
+                raise CerqueiraModelError("Unknown serialized model family")
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile) as error:
+        if isinstance(error, CerqueiraModelError):
+            raise
+        raise CerqueiraModelError("Serialized model could not be safely loaded") from error
     if not np.array_equal(classes, CLASSES):
         raise CerqueiraModelError("Serialized class order differs from the fixed 0/1/2 order")
     return {"family": family, "regularization": None if regularization < 0 else regularization,
             "transformer": transformer, "model": model,
-            "feature_columns": manifest["feature_columns_ordered"],
-            "feature_extraction": manifest["feature_extraction"], "manifest_entry": entry}
+            "feature_columns": feature_columns,
+            "feature_extraction": feature_extraction, "manifest_entry": entry}
 
 
 def predict_model_bundle(bundle: dict[str, Any], raw_features: np.ndarray) -> np.ndarray:
     """Run inference from the frozen feature matrix using a verified fold bundle."""
-    x = transform_standardizer(np.asarray(raw_features, dtype=np.float64), bundle["transformer"])
+    raw = np.asarray(raw_features, dtype=np.float64)
+    if raw.ndim != 2 or raw.shape[1] != len(bundle["feature_columns"]):
+        raise CerqueiraModelError("Inference feature matrix does not match the frozen model contract")
+    if not np.isfinite(raw).all():
+        raise CerqueiraModelError("Inference feature matrix contains non-finite values")
+    x = transform_standardizer(raw, bundle["transformer"])
     if bundle["family"] == "gaussian_nb":
         return predict_gaussian_nb_proba(bundle["model"], x)
     if bundle["family"] == "softmax_l2":
@@ -657,14 +824,27 @@ def evaluate_loso(
         raise CerqueiraModelError(str(error)) from error
     if not feature_path.is_file() or not summary_path.is_file():
         raise CerqueiraModelError("Feature CSV and its extraction summary are required")
+    try:
+        if feature_path.stat().st_size > MAX_FEATURE_CSV_BYTES:
+            raise CerqueiraModelError("Feature CSV exceeds configured size limit")
+        if summary_path.stat().st_size > MAX_FEATURE_SUMMARY_BYTES:
+            raise CerqueiraModelError("Feature extraction summary exceeds configured size limit")
+        with summary_path.open("rb") as stream:
+            summary_bytes = stream.read(MAX_FEATURE_SUMMARY_BYTES + 1)
+        if len(summary_bytes) > MAX_FEATURE_SUMMARY_BYTES:
+            raise CerqueiraModelError("Feature extraction summary exceeds configured size limit")
+        source_summary = json.loads(summary_bytes.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise CerqueiraModelError("Feature extraction summary is not valid JSON") from error
     if out_dir.exists() and any(out_dir.iterdir()):
         raise CerqueiraModelError("Refusing to overwrite nonempty model output directory")
     out_dir.mkdir(parents=True, exist_ok=True)
-    source_summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    csv_hash = hashlib.sha256(feature_path.read_bytes()).hexdigest()
+    csv_hash = _sha256_file_limited(feature_path, MAX_FEATURE_CSV_BYTES)
     if csv_hash != source_summary.get("feature_csv_sha256"):
         raise CerqueiraModelError("Feature CSV hash differs from its extraction summary")
-    frame = pd.read_csv(feature_path)
+    frame = pd.read_csv(feature_path, nrows=MAX_FEATURE_ROWS + 1)
+    if len(frame) > MAX_FEATURE_ROWS:
+        raise CerqueiraModelError("Feature CSV exceeds configured row limit")
     if len(frame) != int(source_summary.get("feature_csv_rows", -1)):
         raise CerqueiraModelError("Feature CSV row count differs from extraction summary")
     feature_columns = list(source_summary["feature_columns"])
@@ -734,7 +914,7 @@ def evaluate_loso(
             "regularization": chosen_regularization,
             "selected_by_inner_grouped_validation": selection,
         })
-        print(f"LOSO {outer_index}/{len(folds)} participant={int(subjects[test[0]])} selected={selected_by_outer[str(int(subjects[test[0]]))]}")
+        print(f"LOSO fold {outer_index}/{len(folds)} complete; selected_family={selected_by_outer[str(int(subjects[test[0]]))]}")
 
     if any(not np.isfinite(values).all() for values in probability_buffers.values()):
         raise CerqueiraModelError("Incomplete/non-finite out-of-fold predictions")
@@ -853,7 +1033,12 @@ def main() -> None:
     result = evaluate_loso(args.feature_csv, args.feature_summary_json, args.output_directory,
                            regularizations=tuple(args.regularizations), inner_splits=args.inner_splits,
                            max_iter=args.max_iter, alignment_receipt_path=args.alignment_receipt)
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    print(json.dumps({
+        "status": "complete",
+        "fold_count": len(result["outer_selection"]),
+        "model_family": result["model_family"],
+        "regularization": result["regularization"],
+    }, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

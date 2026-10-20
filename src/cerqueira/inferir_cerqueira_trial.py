@@ -35,6 +35,12 @@ class InferenceError(ValueError):
 def read_signal_csv(path: str | Path) -> tuple[np.ndarray, np.ndarray, list[str]]:
     """Read one signal CSV with paired, synchronized channel timestamps."""
     source = Path(path)
+    try:
+        file_size = source.stat().st_size
+    except OSError as error:
+        raise InferenceError("Cannot inspect signal CSV size") from error
+    if file_size > alignment.MAX_ARCHIVE_MEMBER_BYTES:
+        raise InferenceError("Signal CSV exceeds configured size limit")
     times: list[float] = []
     values: list[list[float]] = []
     with source.open("r", encoding="utf-8-sig", newline="") as stream:
@@ -48,6 +54,8 @@ def read_signal_csv(path: str | Path) -> tuple[np.ndarray, np.ndarray, list[str]
             raise InferenceError("Expected four timestamp columns and four EMG channel columns")
         previous: float | None = None
         for line_number, row in enumerate(reader, start=2):
+            if line_number - 2 >= alignment.MAX_SIGNAL_ROWS:
+                raise InferenceError("Signal CSV exceeds configured sample-row limit")
             if len(row) != len(header):
                 raise InferenceError(f"Malformed row at line {line_number}")
             try:
@@ -228,8 +236,14 @@ def main() -> None:
     parser.add_argument("--output-csv", required=True, type=Path)
     parser.add_argument("--summary-json", required=True, type=Path)
     args = parser.parse_args()
-    print(json.dumps(run_inference(args.input_csvs, args.model, args.fold_manifest, args.output_csv, args.summary_json),
-                     indent=2, ensure_ascii=False))
+    summary = run_inference(args.input_csvs, args.model, args.fold_manifest, args.output_csv, args.summary_json)
+    print(json.dumps({
+        "status": "complete",
+        "model_family": summary["model_family"],
+        "samples_processed": summary["samples_processed"],
+        "complete_windows_scored": summary["complete_windows_scored"],
+        "predicted_label_counts": summary["predicted_label_counts"],
+    }, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

@@ -73,7 +73,11 @@ python src\cerqueira\inferir_cerqueira_trial.py `
   --summary-json "$privateOutput\heldout_inference.json"
 ```
 
-Los CSV deben contener cuatro canales EMG y cuatro columnas de tiempo sincronizadas con encabezados compatibles con `x [s]`. La entrada debe ser finita, monótona y continua; los fragmentos, si se usan, deben entregarse en orden y sin huecos ni solapamientos. El cargador valida el hash del modelo contra el manifiesto. Los modelos de pliegue son para evaluación fuera de participante y no equivalen a un artefacto universal de despliegue.
+Los CSV deben contener cuatro canales EMG y cuatro columnas de tiempo sincronizadas con encabezados compatibles con `x [s]`. La entrada debe ser finita, monótona y continua; los fragmentos, si se usan, deben entregarse en orden y sin huecos ni solapamientos. El cargador valida el hash del modelo contra el manifiesto, el orden de características, las dimensiones y la finitud de las matrices. Ese hash comprueba que los dos archivos coinciden; **no autentica quién los creó**. Obtén el modelo y su manifiesto por una vía de confianza. Los modelos de pliegue son para evaluación fuera de participante y no equivalen a un artefacto universal de despliegue.
+
+Los lectores fallan de forma cerrada al exceder límites de recursos: 8 GiB por archivo ZIP externo, 10.000 miembros, 512 MiB por miembro, 8 GiB expandidos por archivo y razón de compresión máxima de 10.000; los CSV de señal y etiquetas tienen un límite de 1.000.000 de filas. El entrenador limita la tabla de características a 512 MiB y 250.000 filas, y su resumen JSON a 4 MiB; calcula el SHA-256 de la tabla por bloques, sin copiar el archivo completo a memoria. Los modelos NPZ admiten hasta 64 MiB comprimidos o expandidos, 32 miembros y 512 columnas de características; los manifiestos de pliegue se limitan a 4 MiB. Estos límites cubren el corpus oficial verificado y deben revisarse si se usa otra fuente.
+
+La consola presenta un resumen sin nombres de archivos, hashes ni IDs de sujeto. Los recibos JSON y CSV detallados conservan información de procedencia y deben permanecer restringidos fuera del checkout.
 
 ## Verificación del código
 

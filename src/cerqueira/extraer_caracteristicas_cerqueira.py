@@ -192,6 +192,8 @@ def _role_and_side(channel_name: str) -> tuple[str, str]:
 
 
 def _read_signal_prefix(stream: BinaryIO, expected_rows: int) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    if expected_rows < 0 or expected_rows > alignment.MAX_SIGNAL_ROWS:
+        raise FeatureExtractionError("EMG trial exceeds configured sample-row limit")
     text = io.TextIOWrapper(stream, encoding="utf-8-sig", newline="")
     try:
         reader = csv.reader(text)
@@ -237,7 +239,9 @@ def _read_labels(stream: BinaryIO) -> tuple[np.ndarray, np.ndarray]:
             raise FeatureExtractionError(f"Unexpected label header: {reader.fieldnames}")
         times: list[float] = []
         values: list[int] = []
-        for row in reader:
+        for row_index, row in enumerate(reader):
+            if row_index >= alignment.MAX_LABEL_ROWS:
+                raise FeatureExtractionError("Fatigue-label CSV exceeds configured row limit")
             try:
                 time_s = float(row["time"])
                 label = int(row["label"])

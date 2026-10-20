@@ -6,7 +6,9 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
@@ -17,6 +19,7 @@ sys.path.insert(0, str(CERQUEIRA_SRC))
 import auditar_cerqueira_emg_label_alignment as alignment  # noqa: E402
 import entrenar_cerqueira_loso as model_tools  # noqa: E402
 import extraer_caracteristicas_cerqueira as features  # noqa: E402
+import inferir_cerqueira_trial as inference  # noqa: E402
 from inferir_cerqueira_trial import InferenceError, run_inference  # noqa: E402
 
 
@@ -275,6 +278,134 @@ class CerqueiraPublicPipelineTests(unittest.TestCase):
             model_path.write_bytes(model_path.read_bytes() + b"tamper")
             with self.assertRaises(model_tools.CerqueiraModelError):
                 model_tools.load_fold_model_bundle(model_path, manifest_path)
+
+    def test_model_loader_rejects_nonfinite_and_shape_mismatched_arrays(self):
+        for failure in ("nonfinite", "shape"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                model_path, manifest_path = self._write_synthetic_fold(root)
+                with np.load(model_path, allow_pickle=False) as payload:
+                    arrays = {name: np.array(payload[name]) for name in payload.files}
+                if failure == "nonfinite":
+                    arrays["median"][0] = np.nan
+                else:
+                    arrays["means"] = arrays["means"][:, :-1]
+                np.savez_compressed(model_path, **arrays)
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest["fold_models"][0]["model_sha256"] = hashlib.sha256(
+                    model_path.read_bytes()
+                ).hexdigest()
+                manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+                with self.assertRaises(model_tools.CerqueiraModelError):
+                    model_tools.load_fold_model_bundle(model_path, manifest_path)
+
+    def test_model_loader_rejects_invalid_feature_contract_ranges(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            model_path, manifest_path = self._write_synthetic_fold(root)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["feature_extraction"]["sampling_hz_median"] = -1000.0
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaises(model_tools.CerqueiraModelError):
+                model_tools.load_fold_model_bundle(model_path, manifest_path)
+
+    def test_training_rejects_oversized_feature_csv_before_hashing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            feature_path = root / "features.csv"
+            summary_path = root / "summary.json"
+            feature_path.write_text("feature\n1\n", encoding="utf-8")
+            summary_path.write_text("{}", encoding="utf-8")
+            with mock.patch.object(model_tools, "MAX_FEATURE_CSV_BYTES", 1, create=True):
+                with self.assertRaisesRegex(model_tools.CerqueiraModelError, "Feature CSV exceeds"):
+                    model_tools.evaluate_loso(feature_path, summary_path, root / "out")
+
+    def test_training_rejects_oversized_feature_summary_before_reading(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            feature_path = root / "features.csv"
+            summary_path = root / "summary.json"
+            feature_path.write_text("feature\n1\n", encoding="utf-8")
+            summary_path.write_text("{} ", encoding="utf-8")
+            with mock.patch.object(model_tools, "MAX_FEATURE_SUMMARY_BYTES", 1, create=True):
+                with self.assertRaisesRegex(model_tools.CerqueiraModelError, "summary exceeds"):
+                    model_tools.evaluate_loso(feature_path, summary_path, root / "out")
+
+    def test_training_rejects_feature_csv_over_row_limit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            feature_path = root / "features.csv"
+            summary_path = root / "summary.json"
+            content = "subject_index,trial_index,window_index,label,value\n1,1,0,0,1.0\n1,1,1,1,2.0\n"
+            feature_path.write_text(content, encoding="utf-8")
+            summary_path.write_text(json.dumps({
+                "feature_csv_sha256": hashlib.sha256(feature_path.read_bytes()).hexdigest(),
+                "feature_csv_rows": 2,
+                "feature_columns": ["value"],
+            }), encoding="utf-8")
+            with mock.patch.object(model_tools, "MAX_FEATURE_ROWS", 1, create=True):
+                with self.assertRaisesRegex(model_tools.CerqueiraModelError, "Feature CSV exceeds"):
+                    model_tools.evaluate_loso(feature_path, summary_path, root / "out")
+
+    def test_archive_reader_rejects_resource_limit_excess(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            archive_path = Path(temporary) / "subjects.zip"
+            with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("subject_1.zip", b"one")
+                archive.writestr("subject_2.zip", b"two")
+            with mock.patch.object(alignment, "MAX_ARCHIVE_MEMBERS", 1, create=True):
+                with self.assertRaisesRegex(alignment.AlignmentAuditError, "resource limit"):
+                    alignment._outer_subject_entries(archive_path)
+
+    def test_signal_csv_reader_rejects_excessive_rows(self):
+        csv_text = (
+            "x [s],x [s].1,x [s].2,x [s].3,a,b,c,d\n"
+            "0,0,0,0,0.1,0.2,0.3,0.4\n"
+            "0.01,0.01,0.01,0.01,0.1,0.2,0.3,0.4\n"
+            "0.02,0.02,0.02,0.02,0.1,0.2,0.3,0.4\n"
+        )
+        with mock.patch.object(alignment, "MAX_SIGNAL_ROWS", 2, create=True):
+            with self.assertRaisesRegex(alignment.AlignmentAuditError, "row limit"):
+                alignment._read_signal_csv(io.BytesIO(csv_text.encode("utf-8")))
+
+    def test_inference_cli_does_not_print_source_paths_or_hashes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            model_path, manifest_path = self._write_synthetic_fold(root)
+            input_path = self._write_synthetic_trial(root / "synthetic_trial.csv")
+            output_csv = root / "scores.csv"
+            summary_json = root / "summary.json"
+            argv = [
+                "inferir_cerqueira_trial.py", str(input_path),
+                "--model", str(model_path), "--fold-manifest", str(manifest_path),
+                "--output-csv", str(output_csv), "--summary-json", str(summary_json),
+            ]
+            stdout = io.StringIO()
+            with mock.patch.object(sys, "argv", argv), redirect_stdout(stdout):
+                inference.main()
+            printed = stdout.getvalue()
+            self.assertNotIn(str(root), printed)
+            self.assertNotIn(input_path.name, printed)
+            self.assertNotIn(hashlib.sha256(input_path.read_bytes()).hexdigest(), printed)
+            self.assertIn("complete_windows_scored", printed)
+
+    def test_training_cli_does_not_print_subject_ids_or_output_paths(self):
+        private = {
+            "metrics_path": "C:/restricted/metrics.json",
+            "outer_selection": {"subject_13": "gaussian_nb"},
+            "model_family": "gaussian_nb",
+            "regularization": None,
+        }
+        argv = ["entrenar_cerqueira_loso.py", "features.csv", "summary.json", "out"]
+        stdout = io.StringIO()
+        with mock.patch.object(sys, "argv", argv), mock.patch.object(
+            model_tools, "evaluate_loso", return_value=private
+        ), redirect_stdout(stdout):
+            model_tools.main()
+        printed = stdout.getvalue()
+        self.assertNotIn("restricted", printed)
+        self.assertNotIn("subject_13", printed)
+        self.assertIn('"fold_count": 1', printed)
 
     def test_inference_rejects_output_aliases_and_creates_both_parents(self):
         with tempfile.TemporaryDirectory() as temporary:
