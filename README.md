@@ -1,6 +1,22 @@
-# Análisis de señales EMG y progresión temporal
+# Análisis EMG — estado público F48
 
-Este repositorio contiene código, bibliografía e informe público agregado para auditar grabaciones EMG y estudiar rasgos temporales y espectrales. El modelo local clasifica tercios de tiempo del archivo; no es un detector de fatiga fisiológica.
+**Actualización intermedia del 20 de octubre de 2026.** Este paquete reúne código de procesamiento, pruebas, bibliografía y resultados agregados permitidos. La versión del informe DOCX/PDF F31 que permanece en `reports/` es histórica y corresponde a un benchmark de posición temporal; no es el manuscrito F48 ni una versión final del estudio.
+
+El análisis fisiológico principal usa las grabaciones locales de cuádriceps. No hay etiquetas independientes de fatiga funcional, fuerza/torque sincronizados, repeticiones verificadas ni calibración física del canal, por lo que no se presenta un detector local de fatiga. El benchmark Borg es un experimento separado de esfuerzo percibido en EMG de hombro. El experimento ordinal de Cerqueira es una tercera rama independiente de fatiga autopercibida de miembro superior y todavía no tiene un corpus EMG alineado ni un modelo entrenado y verificado.
+
+Este paquete público no contiene señales, HTML con señales embebidas, resultados por participante/ventana, datos de identificación, checkpoints ni inferencias individuales. El modelo Borg congelado no se publica: el SHA está auditado, pero la carga e inferencia reproducibles siguen sin demostrarse en un runtime autorizado.
+
+## Resultados consolidados F48
+
+El inventario local contiene 140 grabaciones de 15 grupos derivados de nombres de archivo; 138 registros formales R1–R5 sustentan el análisis descriptivo y dos registros R0/R0_1 se conservaron solo para control de calidad. Hay 27 pares emparejables de participante y pierna para R1 frente a R5. En esos pares, el cambio mediano fue RMS +31,27 % (IC del 95 %: 5,11 a 40,04), MDF +1,45 Hz (−4,49 a 2,22) y MNF −2,06 Hz (−6,56 a 1,00). Los intervalos espectrales incluyen cero: no se observó una reducción de MDF/MNF consistente en el conjunto. Estos son cambios eléctricos descriptivos, no niveles ni eventos confirmados de fatiga.
+
+Se auditaron 2.102 candidatos de activación; no están sincronizados con marcadores mecánicos y no se denominan repeticiones verificadas. La evaluación visual de una muestra tampoco proporciona una referencia independiente para sensibilidad o especificidad de eventos.
+
+El benchmark separado de Borg incluye 34 participantes y 1.309 ventanas OOF para RPE ≥17. El procedimiento de selección anidada agrupada por participante obtuvo macro-F1 agrupado 0,6176 y macro-F1 medio por participante 0,5787 (DE 0,1344). Mide esfuerzo percibido alto en el protocolo de hombro, no fatiga fisiológica de cuádriceps. El checkpoint Borg no ha producido aún una predicción reproducible.
+
+La rama Cerqueira conserva su objetivo como fatiga autopercibida ordinal de miembro superior (0/1/2). La recuperación del archivo crudo y la sincronización ensayo-etiqueta permanecen en verificación; no se informa entrenamiento, métrica ni validación hasta cerrar tamaño, checksum y alineación.
+
+La edición F48 del manuscrito conserva los 44 registros bibliográficos y la estructura del template docente. El validador estructural confirma las secciones requeridas, citas, tablas y figuras; la compilación IEEE sigue pendiente porque no está disponible la distribución Tectonic requerida y no hay motor TeX local verificado. No se declara un PDF ni una extensión de páginas como completados.
 
 ## Alcance y datos
 
@@ -8,7 +24,9 @@ El análisis de señales EMG, la extracción de características y la evaluació
 
 No se publican señales, datos por participante, características, etiquetas, particiones, predicciones, resultados por pliegue ni recibos privados. Las mediciones originales y salidas con granularidad individual permanecen en el almacenamiento local restringido. El benchmark completo requiere acceso autorizado a los datos. La comprobación exploratoria externa posterior al congelamiento del modelo no se incluye como datos o figura en esta edición pública.
 
-## Resultados agregados locales (F31)
+## Resultados históricos agregados locales (F31; clasificación de posición temporal)
+
+Los valores siguientes pertenecen a la publicación histórica F31. El análisis F48 posterior añade el filtro de actividad, el análisis de duraciones/ocupaciones y las comparaciones emparejadas R1–R5 descritas arriba; los resultados F31 no deben interpretarse como el cierre fisiológico actual.
 
 La selección anidada LOSO comparó 325 configuraciones de 11 familias con 15 pliegues externos por participante y cuatro pliegues internos agrupados. Para los tres tercios temporales, el procedimiento anidado obtuvo macro-F1 medio por participante 0,740 (IC 95 % bootstrap 0,689–0,787) y ROC-AUC macro OvR 0,941 (0,921–0,959). La regresión logística tuvo el mayor punto de macro-F1 entre selectores de familia fija (0,751), pero no se estableció superioridad ni un único modelo universal.
 

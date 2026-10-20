@@ -53,6 +53,16 @@ La variable objetivo del análisis F31 es el tercio temporal temprano, medio o t
 
 No se añadió una licencia porque los derechos para otorgarla no se verificaron. La reproducción completa requiere acceso autorizado a las grabaciones locales.
 
+## F48 — actualización pública de código y estado (2026-10-20)
+
+Esta revisión parte del commit remoto `19a024f6a8ed18da6b829f88725fcf267e417a93` en `main`. El historial disponible fue inspeccionado y los commits usan la dirección GitHub no-reply `223176968+EthanGL1@users.noreply.github.com`. El proyecto científico principal mantiene el análisis descriptivo local R1–R5; el Borg de hombro y la rama ordinal de Cerqueira siguen siendo experimentos independientes.
+
+En un clon limpio del commit base, antes de esta actualización pasaron **47 pruebas unitarias**; también pasaron `compileall` y la carga de ayuda del CLI. La ejecución end-to-end existente `src/reproducir_emg_referencia.py --demo --dashboard` generó las exportaciones de segmentos, máscaras, características, FFT, PSD, STFT, eventos candidatos, resumen JSON y visor HTML. El modo declara que utiliza exclusivamente fixtures sintéticas deterministas. Esta comprobación valida la ruta de software y exportación, no los resultados fisiológicos ni la reproducción de la cohorte.
+
+El README y este informe incorporan agregados F48 sin incluir trazas ni salidas por sujeto. El DOCX/PDF F31 se conserva en `reports/` como versión histórica. No se incluye el checkpoint Borg porque no se ha demostrado carga e inferencia reproducibles. La recuperación de Cerqueira no se considera corpus completo ni sincronizado. El manuscrito LaTeX F48 está estructuralmente validado, pero la compilación PDF sigue bloqueada por la descarga no disponible del bundle Tectonic y no se declara un PDF final.
+
+**Estado de publicación:** esta actualización es intermedia y de código/estado seguro. No declara final el informe científico, el modelo Borg, el modelo ordinal Cerqueira ni una validación fisiológica externa.
+
 
 ## F44 — Reensamblado funcional y verificación actual (2026-10-19)
 
