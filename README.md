@@ -48,6 +48,8 @@ Para la señal centrada de cada ventana, RMS = sqrt((1/N) sum x_c[n]^2). Se esti
 - `reports/`: informe IEEE público F31, resumen y heatmap agregado por pierna/serie, nota metodológica y auditoría del paquete.
 - `manifest/SHA256SUMS`: hashes del paquete.
 
+El manifiesto contiene los SHA-256 de los bytes versionados de cada archivo rastreado, excepto el propio manifiesto. Así los hashes permanecen estables aunque un checkout de Windows convierta finales de línea LF/CRLF.
+
 ## Reproducibilidad
 
 Se verificaron Python 3.12.14, NumPy 2.3.5, pandas 3.0.1 y Pillow 12.3.0. El entorno mínimo y comandos de ayuda están en `requirements.txt` y en cada módulo. La inspección de ayuda no lee datos ni lanza entrenamiento. Los argumentos de datos y salida deben apuntar a almacenamiento autorizado fuera de este repositorio.
