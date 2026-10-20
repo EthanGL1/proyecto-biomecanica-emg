@@ -1,6 +1,6 @@
 # Auditoría del paquete público EMG — F31/F44
 
-**Fecha:** 19–20 de octubre de 2026
+**Fecha:** 19 de octubre de 2026 (America/Guayaquil)
 **Estado:** candidato público intermedio. La base remota revisada antes de esta ampliación fue `9a53053f819580803fe01f148429abc3ba7b5731`; esta actualización incorpora una interfaz CSV agrupada, reensamblado de fragmentos y correcciones puntuales de seguridad. El paquete sigue sin incluir un modelo Borg verificable ni una validación fisiológica de fatiga.
 
 **Referencia remota base:** `main` apuntaba a `9a53053f819580803fe01f148429abc3ba7b5731` (`Fix public EMG pipeline provenance and audit metadata`) antes de esta actualización. La matriz describe también los límites de la interfaz agrupada añadida en F43; la verificación del commit remoto actualizado se registra en la gestión local del proyecto.
@@ -20,7 +20,7 @@ El informe público conserva resultados agregados locales. Se eliminaron las fig
 - PDF exportado desde Word en A4, con 22 páginas renderizadas e inspeccionadas; no se detectaron desbordes ni tablas rotas.
 - Las dos bibliografías se cotejaron con las versiones consolidadas y no se modificaron.
 - La matriz por lado reporta 14 grupos izquierdos y 15 derechos, con 14 pareados; la diferencia Macro-F1 incluye cero.
-- El manifiesto `SHA256SUMS` de la base histórica tenía 33 entradas; se recalculará y comprobará para esta revisión antes de cualquier actualización remota. La actualización F44-04 aún debe reconciliarse con el estado actual de `main`.
+- El manifiesto `SHA256SUMS` contiene 35 entradas para los 35 archivos versionados salvo el propio manifiesto; los 35 hashes de los blobs en el índice coinciden. Se incorporó el `main` remoto `d46875b` mediante una fusión de avance combinado, sin forzar el historial.
 
 ## Matriz de brechas de reproducibilidad
 
@@ -61,7 +61,7 @@ No se añadió una licencia porque los derechos para otorgarla no se verificaron
 - En almacenamiento restringido, una grabación formal R1 ya autorizada se procesó completa y luego como cuatro CSV contiguos. Las seis tablas de señal (`segments`, `mask`, `features`, `fft`, `psd`, `stft`) coincidieron byte por byte. La ejecución completa generó cinco ramas de filtro; la salida se mantuvo fuera del repositorio.
 - Este resultado verifica el reensamblado fuera de línea para una grabación. No demuestra que se haya procesado la cohorte completa, que haya una inferencia Borg funcional, que exista una predicción temporal/Gantt verificable ni que se detecte fatiga fisiológica. No se incluye ningún CSV, señal, salida individual, checkpoint ni hash privado en este paquete.
 
-## F44-04 — Correcciones de seguridad enfocadas (2026-10-20)
+## F44-04 — Correcciones de seguridad enfocadas (2026-10-19)
 
 La auditoría Codex Security de la revisión `009ba01016fa293b8e3715379f1ec35c6f9812a9` reportó dos hallazgos locales: CWE-22 en rutas derivadas de manifiestos/etiquetas y CWE-1236 en el campo `subject_id` exportado a CSV. Se añadieron resolución de rutas contenidas en la raíz configurada, validación de componentes de nombre de archivo y neutralización de prefijos de fórmula únicamente en el CSV exportado. Las claves originales permanecen intactas en memoria. Una prueba con junction en Windows confirma el rechazo de una ruta que apunta fuera de su raíz; otra recorre las seis tablas agrupadas y confirma que sus identificadores de fórmula se exportan neutralizados.
 
