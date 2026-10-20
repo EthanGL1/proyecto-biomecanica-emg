@@ -18,7 +18,7 @@ El benchmark separado de Borg incluye 34 participantes y 1.309 ventanas OOF para
 
 La rama Cerqueira conserva su objetivo como fatiga autopercibida ordinal de miembro superior (0/1/2). Los ZIP oficiales de señal y etiquetas coinciden con los checksums del registro Zenodo; se emparejaron 13 participantes y 156 ensayos, con 34 ensayos que contienen marcas no monótonas y 9 ensayos/11 filas con discordancias entre canales. El LOSO primario (≥90 % de cobertura por ensayo) incluye 146 ensayos y 44.886 ventanas; la sensibilidad ≥95 % incluye 143 ensayos y 44.428 ventanas. Macro-F1 medio por participante fue 0,368 (IC95 % 0,319–0,415) para EMG frente a 0,713 (0,666–0,755) para el baseline temporal. Las etiquetas son fuertemente crecientes con el tiempo (Spearman medio por ensayo 0,9022). El checkpoint de pliegue retenido produjo 223 predicciones reproducibles sobre un ensayo real sin usar etiquetas. Es validación interna dentro del mismo dataset; no es una prueba externa ni un detector de pérdida funcional o de fatiga de cuádriceps. Los datos, artefactos y predicciones granulares permanecen restringidos y no forman parte de este repositorio.
 
-La edición F48 del manuscrito conserva los 44 registros bibliográficos y la estructura del template docente. El validador estructural confirma las secciones requeridas, citas, tablas y figuras; la compilación IEEE sigue pendiente porque no está disponible la distribución Tectonic requerida y no hay motor TeX local verificado. No se declara un PDF ni una extensión de páginas como completados.
+La fuente LaTeX F49 conserva los 44 registros bibliográficos y la estructura del template docente. El validador estructural confirma las secciones requeridas, citas, tablas y figuras; la compilación IEEE sigue pendiente porque el bundle Tectonic no está disponible en el entorno autorizado. No se declara un PDF ni una extensión de páginas como completados.
 
 ## Alcance y datos
 
@@ -28,7 +28,7 @@ No se publican señales, datos por participante, características, etiquetas, pa
 
 ## Resultados históricos agregados locales (F31; clasificación de posición temporal)
 
-Los valores siguientes pertenecen a la publicación histórica F31. El análisis F48 posterior añade el filtro de actividad, el análisis de duraciones/ocupaciones y las comparaciones emparejadas R1–R5 descritas arriba; los resultados F31 no deben interpretarse como el cierre fisiológico actual.
+Los valores siguientes pertenecen a la publicación histórica F31. El análisis F49 posterior añade el filtro de actividad, el análisis de duraciones/ocupaciones y las comparaciones emparejadas R1–R5 descritas arriba; los resultados F31 no deben interpretarse como el cierre fisiológico actual.
 
 La selección anidada LOSO comparó 325 configuraciones de 11 familias con 15 pliegues externos por participante y cuatro pliegues internos agrupados. Para los tres tercios temporales, el procedimiento anidado obtuvo macro-F1 medio por participante 0,740 (IC 95 % bootstrap 0,689–0,787) y ROC-AUC macro OvR 0,941 (0,921–0,959). La regresión logística tuvo el mayor punto de macro-F1 entre selectores de familia fija (0,751), pero no se estableció superioridad ni un único modelo universal.
 
