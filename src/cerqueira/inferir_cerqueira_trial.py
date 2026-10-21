@@ -156,12 +156,16 @@ def infer_signal_arrays(
 def run_inference(
     input_csvs: list[str | Path],
     model_path: str | Path,
-    fold_manifest_path: str | Path,
+    fold_manifest_path: str | Path | None,
     output_csv: str | Path,
     summary_json: str | Path,
+    *,
+    final_manifest_path: str | Path | None = None,
 ) -> dict[str, Any]:
     if not input_csvs:
         raise InferenceError("At least one input CSV is required")
+    if (fold_manifest_path is None) == (final_manifest_path is None):
+        raise InferenceError("Provide exactly one fold manifest or final-model manifest")
     out_csv, out_json = Path(output_csv).expanduser(), Path(summary_json).expanduser()
     try:
         ensure_outside_public_checkout((out_csv, out_json))
@@ -170,15 +174,21 @@ def run_inference(
     output_resolved = {out_csv.resolve(), out_json.resolve()}
     if len(output_resolved) != 2:
         raise InferenceError("Prediction CSV and summary JSON outputs must be different files")
+    manifest_path = final_manifest_path if final_manifest_path is not None else fold_manifest_path
+    assert manifest_path is not None
     protected_resolved = {
         Path(value).expanduser().resolve()
-        for value in [*input_csvs, model_path, fold_manifest_path]
+        for value in [*input_csvs, model_path, manifest_path]
     }
     if output_resolved & protected_resolved:
         raise InferenceError("Inference outputs must not overwrite an input, model, or fold manifest")
     if out_csv.exists() or out_json.exists():
         raise InferenceError("Refusing to overwrite existing inference outputs")
-    bundle = model_tools.load_fold_model_bundle(model_path, fold_manifest_path)
+    if final_manifest_path is not None:
+        bundle = model_tools.load_final_model_bundle(model_path, final_manifest_path)
+    else:
+        assert fold_manifest_path is not None
+        bundle = model_tools.load_fold_model_bundle(model_path, fold_manifest_path)
     fragments = []
     source_records = []
     for path_value in input_csvs:
@@ -202,6 +212,7 @@ def run_inference(
         "model_file": Path(model_path).name,
         "model_sha256": bundle["manifest_entry"]["model_sha256"],
         "model_family": bundle["family"],
+        "model_artifact_type": bundle.get("artifact_type", "loso_fold"),
         "model_feature_columns": bundle["feature_columns"],
         "input_files": source_records,
         "fragment_assembly": fragment_metadata,
@@ -232,14 +243,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input_csvs", nargs="+", type=Path, help="one complete CSV or ordered contiguous fragments")
     parser.add_argument("--model", required=True, type=Path)
-    parser.add_argument("--fold-manifest", required=True, type=Path)
+    manifest_group = parser.add_mutually_exclusive_group(required=True)
+    manifest_group.add_argument("--fold-manifest", type=Path)
+    manifest_group.add_argument("--final-manifest", type=Path)
     parser.add_argument("--output-csv", required=True, type=Path)
     parser.add_argument("--summary-json", required=True, type=Path)
     args = parser.parse_args()
-    summary = run_inference(args.input_csvs, args.model, args.fold_manifest, args.output_csv, args.summary_json)
+    summary = run_inference(
+        args.input_csvs,
+        args.model,
+        args.fold_manifest,
+        args.output_csv,
+        args.summary_json,
+        final_manifest_path=args.final_manifest,
+    )
     print(json.dumps({
         "status": "complete",
         "model_family": summary["model_family"],
+        "model_artifact_type": summary["model_artifact_type"],
         "samples_processed": summary["samples_processed"],
         "complete_windows_scored": summary["complete_windows_scored"],
         "predicted_label_counts": summary["predicted_label_counts"],

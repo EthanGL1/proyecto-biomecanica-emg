@@ -63,6 +63,43 @@ class CerqueiraPublicPipelineTests(unittest.TestCase):
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         return model_path, manifest_path
 
+    def _write_synthetic_final_model(self, directory: Path) -> tuple[Path, Path]:
+        columns = features._feature_columns()
+        model_path = directory / "synthetic_final_model.npz"
+        np.savez_compressed(
+            model_path,
+            coef=np.zeros((len(columns), 3), dtype=np.float64),
+            intercept=np.array([-0.2, 0.1, 0.3], dtype=np.float64),
+            median=np.zeros(len(columns), dtype=np.float64),
+            mean=np.zeros(len(columns), dtype=np.float64),
+            scale=np.ones(len(columns), dtype=np.float64),
+            classes=np.array([0, 1, 2], dtype=np.int64),
+        )
+        manifest_path = directory / "final_model_manifest.json"
+        manifest = {
+            "task": "self-perceived upper-limb fatigue ordinal labels (0/1/2)",
+            "model_family": "softmax_l2",
+            "regularization": 0.01,
+            "model_file": model_path.name,
+            "model_sha256": hashlib.sha256(model_path.read_bytes()).hexdigest(),
+            "feature_columns_ordered": columns,
+            "preprocessing": (
+                "training-fold median imputation, then training-fold mean/std scaling; "
+                "final artifact stores these statistics"
+            ),
+            "feature_extraction": {
+                "window_seconds": 1.0,
+                "window_overlap_fraction": 0.0,
+                "frequency_band_hz": [20.0, 400.0],
+                "fir_design": "symmetric Hamming-window FIR bandpass",
+                "fir_taps": 251,
+                "sampling_hz_median": 1000.0,
+            },
+            "not_a_fatigue_function_model": True,
+        }
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        return model_path, manifest_path
+
     def _write_synthetic_trial(self, path: Path, *, samples: int = 5000) -> Path:
         sampling_hz = 1000.0
         times = np.arange(samples, dtype=np.float64) / sampling_hz
@@ -278,6 +315,48 @@ class CerqueiraPublicPipelineTests(unittest.TestCase):
             model_path.write_bytes(model_path.read_bytes() + b"tamper")
             with self.assertRaises(model_tools.CerqueiraModelError):
                 model_tools.load_fold_model_bundle(model_path, manifest_path)
+
+    def test_inference_cli_loads_full_fit_model_from_final_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            model_path, manifest_path = self._write_synthetic_final_model(root)
+            input_path = self._write_synthetic_trial(root / "synthetic_trial.csv", samples=3000)
+            output_path = root / "final_scores.csv"
+            summary_path = root / "final_summary.json"
+            argv = [
+                "inferir_cerqueira_trial.py", str(input_path),
+                "--model", str(model_path), "--final-manifest", str(manifest_path),
+                "--output-csv", str(output_path), "--summary-json", str(summary_path),
+            ]
+            stdout = io.StringIO()
+            with mock.patch.object(sys, "argv", argv), redirect_stdout(stdout):
+                inference.main()
+
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary["model_family"], "softmax_l2")
+            self.assertEqual(summary["model_artifact_type"], "final_fit")
+            self.assertEqual(summary["model_sha256"], hashlib.sha256(model_path.read_bytes()).hexdigest())
+            self.assertEqual(summary["complete_windows_scored"], 3)
+            scores = np.genfromtxt(output_path, delimiter=",", names=True, dtype=None, encoding="utf-8")
+            self.assertEqual(len(scores), 3)
+            self.assertIn('"status": "complete"', stdout.getvalue())
+
+    def test_final_model_loader_rejects_hash_and_contract_mismatches(self):
+        for failure in ("checksum", "preprocessing", "feature_contract"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                model_path, manifest_path = self._write_synthetic_final_model(root)
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                if failure == "checksum":
+                    manifest["model_sha256"] = "0" * 64
+                elif failure == "preprocessing":
+                    manifest["preprocessing"] = "standardize first, then impute"
+                else:
+                    manifest["feature_extraction"]["sampling_hz_median"] = -1000.0
+                manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+                with self.assertRaises(model_tools.CerqueiraModelError):
+                    model_tools.load_final_model_bundle(model_path, manifest_path)
 
     def test_model_loader_rejects_nonfinite_and_shape_mismatched_arrays(self):
         for failure in ("nonfinite", "shape"):

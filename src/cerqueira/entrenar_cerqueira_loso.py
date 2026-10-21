@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import math
 from pathlib import Path
@@ -37,6 +38,11 @@ MAX_MODEL_ABSOLUTE_VALUE = 1e12
 MAX_FEATURE_CSV_BYTES = 512 * 1024**2
 MAX_FEATURE_ROWS = 250_000
 MAX_FEATURE_SUMMARY_BYTES = 4 * 1024**2
+FINAL_PREPROCESSING_CONTRACT = (
+    "training-fold median imputation, then training-fold mean/std scaling; "
+    "final artifact stores these statistics"
+)
+DEFAULT_SAMPLING_RATE_RELATIVE_TOLERANCE = 0.005
 
 
 class CerqueiraModelError(ValueError):
@@ -771,6 +777,182 @@ def load_fold_model_bundle(model_path: str | Path, fold_manifest_path: str | Pat
             "transformer": transformer, "model": model,
             "feature_columns": feature_columns,
             "feature_extraction": feature_extraction, "manifest_entry": entry}
+
+
+def load_final_model_bundle(model_path: str | Path, final_manifest_path: str | Path) -> dict[str, Any]:
+    """Load a full-fit deployment artifact under its standalone manifest contract.
+
+    The checksum detects accidental or uncoordinated file changes; it does not
+    authenticate the artifact's author or establish scientific validity.
+    """
+    path, manifest_path = Path(model_path), Path(final_manifest_path)
+    if not path.is_file() or not manifest_path.is_file():
+        raise CerqueiraModelError("Final model and its manifest are required")
+    if manifest_path.stat().st_size > MAX_MODEL_MANIFEST_BYTES:
+        raise CerqueiraModelError("Final model manifest exceeds configured resource limit")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise CerqueiraModelError("Final model manifest is not valid JSON") from error
+    if not isinstance(manifest, dict):
+        raise CerqueiraModelError("Final model manifest must be a JSON object")
+
+    model_name = manifest.get("model_file")
+    if (
+        not isinstance(model_name, str)
+        or not model_name
+        or model_name in {".", ".."}
+        or "/" in model_name
+        or "\\" in model_name
+        or model_name != path.name
+    ):
+        raise CerqueiraModelError("Final model filename does not match its manifest")
+    expected_digest = manifest.get("model_sha256")
+    if (
+        not isinstance(expected_digest, str)
+        or len(expected_digest) != 64
+        or any(character not in "0123456789abcdef" for character in expected_digest)
+    ):
+        raise CerqueiraModelError("Final model manifest checksum is malformed")
+
+    feature_columns = manifest.get("feature_columns_ordered")
+    if (
+        not isinstance(feature_columns, list)
+        or not 1 <= len(feature_columns) <= MAX_MODEL_FEATURES
+        or any(not isinstance(name, str) or not name or len(name) > 256 for name in feature_columns)
+        or len(set(feature_columns)) != len(feature_columns)
+    ):
+        raise CerqueiraModelError("Final model manifest has an invalid feature-column contract")
+    if manifest.get("preprocessing") != FINAL_PREPROCESSING_CONTRACT:
+        raise CerqueiraModelError("Final model preprocessing contract is missing or unsupported")
+    if manifest.get("not_a_fatigue_function_model") is not True:
+        raise CerqueiraModelError("Final model manifest must preserve the functional-fatigue limitation")
+    task = manifest.get("task")
+    if not isinstance(task, str) or not task.strip():
+        raise CerqueiraModelError("Final model manifest has no task description")
+
+    feature_extraction = manifest.get("feature_extraction")
+    if not isinstance(feature_extraction, dict):
+        raise CerqueiraModelError("Final model manifest has no feature-extraction contract")
+    sampling_hz = feature_extraction.get("sampling_hz_median")
+    sampling_tolerance = feature_extraction.get(
+        "sampling_rate_relative_tolerance", DEFAULT_SAMPLING_RATE_RELATIVE_TOLERANCE
+    )
+    window_seconds = feature_extraction.get("window_seconds")
+    overlap_fraction = feature_extraction.get("window_overlap_fraction")
+    frequency_band = feature_extraction.get("frequency_band_hz")
+    fir_taps = feature_extraction.get("fir_taps")
+    fir_design = feature_extraction.get("fir_design")
+    numeric_contract = (sampling_hz, sampling_tolerance, window_seconds, overlap_fraction)
+    if any(
+        isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value))
+        for value in numeric_contract
+    ):
+        raise CerqueiraModelError("Final model feature-extraction numbers must be finite")
+    if (
+        sampling_hz <= 0
+        or not 0 <= sampling_tolerance < 0.25
+        or not 0 < window_seconds <= 60
+        or not 0 <= overlap_fraction < 1
+        or not isinstance(frequency_band, list)
+        or len(frequency_band) != 2
+        or any(
+            isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value))
+            for value in frequency_band
+        )
+        or not 0 < frequency_band[0] < frequency_band[1] < sampling_hz / 2
+        or isinstance(fir_taps, bool)
+        or not isinstance(fir_taps, int)
+        or fir_taps < 3
+        or fir_taps > 10_001
+        or fir_taps % 2 == 0
+        or fir_design != "symmetric Hamming-window FIR bandpass"
+    ):
+        raise CerqueiraModelError("Final model feature-extraction values are outside supported ranges")
+    feature_extraction = dict(feature_extraction)
+    feature_extraction["sampling_rate_relative_tolerance"] = float(sampling_tolerance)
+
+    family = manifest.get("model_family")
+    regularization = manifest.get("regularization")
+    if family == "softmax_l2":
+        if (
+            isinstance(regularization, bool)
+            or not isinstance(regularization, (int, float))
+            or not math.isfinite(float(regularization))
+            or regularization < 0
+        ):
+            raise CerqueiraModelError("Final softmax regularization is missing or invalid")
+        regularization = float(regularization)
+    elif family == "gaussian_nb":
+        if regularization is not None:
+            raise CerqueiraModelError("Final Gaussian-NB regularization marker is inconsistent")
+    else:
+        raise CerqueiraModelError("Final model family is unsupported")
+
+    _validate_model_container(path)
+    try:
+        model_bytes = path.read_bytes()
+    except OSError as error:
+        raise CerqueiraModelError("Final model could not be read") from error
+    digest = hashlib.sha256(model_bytes).hexdigest()
+    if digest != expected_digest:
+        raise CerqueiraModelError("Final model checksum differs from its manifest")
+
+    feature_count = len(feature_columns)
+    expected_keys = {"median", "mean", "scale", "classes"}
+    expected_keys |= (
+        {"means", "variances", "priors"}
+        if family == "gaussian_nb"
+        else {"coef", "intercept"}
+    )
+    try:
+        with np.load(io.BytesIO(model_bytes), allow_pickle=False) as payload:
+            if set(payload.files) != expected_keys:
+                raise CerqueiraModelError("Final model arrays do not match the declared model family")
+            transformer = {
+                name: _validated_model_array(payload, name, (feature_count,), positive=name == "scale")
+                for name in ("median", "mean", "scale")
+            }
+            classes_raw = np.asarray(payload["classes"])
+            if classes_raw.shape != (len(CLASSES),) or classes_raw.dtype.kind not in "iu":
+                raise CerqueiraModelError("Final model class array has an invalid shape or type")
+            classes = classes_raw.astype(np.int64)
+            if family == "gaussian_nb":
+                model = {
+                    "means": _validated_model_array(payload, "means", (len(CLASSES), feature_count)),
+                    "variances": _validated_model_array(
+                        payload, "variances", (len(CLASSES), feature_count), positive=True
+                    ),
+                    "priors": _validated_model_array(payload, "priors", (len(CLASSES),), positive=True),
+                }
+                if not np.isclose(model["priors"].sum(), 1.0, rtol=0.0, atol=1e-8):
+                    raise CerqueiraModelError("Final Gaussian-NB class priors do not sum to one")
+            else:
+                model = {
+                    "coef": _validated_model_array(payload, "coef", (feature_count, len(CLASSES))),
+                    "intercept": _validated_model_array(payload, "intercept", (len(CLASSES),)),
+                }
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile) as error:
+        if isinstance(error, CerqueiraModelError):
+            raise
+        raise CerqueiraModelError("Final model could not be safely loaded") from error
+    if not np.array_equal(classes, CLASSES):
+        raise CerqueiraModelError("Final model class order differs from the fixed 0/1/2 order")
+    manifest_entry = {
+        "model_file": model_name,
+        "model_sha256": expected_digest,
+        "artifact_type": "final_fit",
+    }
+    return {
+        "family": family,
+        "regularization": regularization,
+        "transformer": transformer,
+        "model": model,
+        "feature_columns": feature_columns,
+        "feature_extraction": feature_extraction,
+        "manifest_entry": manifest_entry,
+        "artifact_type": "final_fit",
+    }
 
 
 def predict_model_bundle(bundle: dict[str, Any], raw_features: np.ndarray) -> np.ndarray:

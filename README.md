@@ -1,8 +1,8 @@
-# Análisis EMG — paquete público reproducible F50.6 (actualización intermedia, 20 de octubre de 2026)
+# Análisis EMG — paquete público reproducible F50.7 (actualización intermedia, 20 de octubre de 2026)
 
 Este repositorio reúne código de procesamiento, pruebas, bibliografía y resultados agregados autorizados. El informe DOCX/PDF F31 que permanece en `reports/` es histórico y corresponde a un benchmark de posición temporal; no es el manuscrito F50 para revisión ni una versión final del estudio.
 
-El [estado público F50.6 (intermedio)](reports/F50.6_STATUS_20261020.md) registra la regresión del procesamiento real completo/fragmentado y los límites actuales. El [estado público F50.5](reports/F50.5_STATUS_20261020.md) conserva los agregados F39 v3 y el replay interno de Cerqueira; los registros anteriores permanecen como historia.
+El [estado público F50.7 (intermedio)](reports/F50.7_STATUS_20261020.md) registra la adición del cargador full-fit de Cerqueira y sus pruebas. El [estado público F50.6](reports/F50.6_STATUS_20261020.md) conserva la regresión del procesamiento real completo/fragmentado; el [estado F50.5](reports/F50.5_STATUS_20261020.md), los agregados F39 v3 y el replay interno de Cerqueira. Los registros anteriores permanecen como historia.
 
 El análisis fisiológico principal usa las grabaciones locales de cuádriceps y no confirma fatiga ni pérdida de fuerza. El benchmark Borg es un experimento separado de esfuerzo percibido en EMG de hombro. Cerqueira es una tercera rama para el auto-reporte ordinal de miembro superior: se reprodujo internamente una inferencia de pliegue retenido, pero el diagnóstico temporal/de tarea supera al predictor EMG y no se recomienda un modelo EMG para despliegue.
 
@@ -153,7 +153,19 @@ Este recorrido prueba el comportamiento numérico del software. No verifica que 
 
 El paquete ahora incluye el código de auditoría de alineación EMG-etiquetas, extracción de características, evaluación anidada LOSO por participante e inferencia de ensayos/fragmentos compatibles en [`src/cerqueira/`](src/cerqueira/README.md). Sus entradas y salidas granulares contienen información por participante, ensayo o ventana: mantenlas en almacenamiento restringido fuera del checkout y no las publiques. Los tests incluidos usan datos sintéticos.
 
-La inferencia pública solo carga modelos de pliegue que están registrados en el manifiesto de evaluación y no consume etiquetas. No hay un modelo de despliegue publicado. Los resultados actuales muestran que el baseline temporal supera al EMG; el código es para reproducibilidad metodológica y no para afirmar detección de fatiga funcional, fatiga del cuádriceps ni una predicción clínica.
+La inferencia admite dos manifiestos sin consumir etiquetas: `--fold-manifest` para un modelo LOSO incluido en el manifiesto de pliegues y `--final-manifest` para un artefacto full-fit entregado localmente por el usuario. En ambos casos comprueba el SHA-256, la familia y dimensiones del modelo, el orden de las características y el contrato de preprocesamiento y extracción. El paquete **no incluye ni distribuye** un checkpoint final; los modelos y las entradas/salidas de inferencia deben permanecer fuera del repositorio en almacenamiento autorizado. El objetivo sigue siendo el auto-reporte ordinal de fatiga autopercibida de miembro superior; no es detección validada de fatiga funcional, fatiga del cuádriceps ni una predicción clínica.
+
+Ejemplo para un artefacto full-fit compatible disponible localmente (sustituye las rutas por rutas autorizadas; las salidas deben quedar fuera del checkout):
+
+```powershell
+python src\cerqueira\inferir_cerqueira_trial.py '<COMPATIBLE_TRIAL.csv>' `
+  --model '<PRIVATE_FINAL_MODEL.npz>' `
+  --final-manifest '<PRIVATE_FINAL_MODEL_MANIFEST.json>' `
+  --output-csv '<PRIVATE_OUTPUT\scores.csv>' `
+  --summary-json '<PRIVATE_OUTPUT\summary.json>'
+```
+
+La forma LOSO existente conserva `--fold-manifest`; ambos argumentos de manifiesto son mutuamente excluyentes. Los archivos mencionados en este ejemplo no forman parte del paquete público.
 
 ### Componentes que aún requieren datos o validación autorizados
 
