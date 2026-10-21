@@ -1,10 +1,26 @@
-# Análisis EMG — paquete público reproducible F53 (actualización intermedia, 21 de octubre de 2026)
+# Análisis EMG — paquete público reproducible F54 (actualización intermedia, 21 de octubre de 2026)
 
 Este repositorio reúne código de procesamiento, pruebas, bibliografía y resultados agregados autorizados. El informe DOCX/PDF F31 de reports/ es histórico; no es la versión privada editable del manuscrito para revisión ni un artículo final aprobado.
 
 El estado público F52 (reports/F52_STATUS_20261020.md) documenta la entrada directa de fragmentos CSV crudos, las pruebas, la demostración y los límites vigentes. Los cortes F51, F50.9 y anteriores se conservan como historia.
 
 La corrección F53 reconcilia el objetivo definido por la guía docente con lo que puede confirmarse en los CSV locales. Consulta [la nota de protocolo F53](reports/F53_PROTOCOL_RECONCILIATION.md) antes de interpretar los resultados: la guía sí especifica recto femoral durante extensión unilateral de rodilla; el archivo de señales no demuestra por sí solo que cada canal se adquirió en ese sitio ni que todos los parámetros previstos se ejecutaron.
+
+## Actualización F54 — resultados agregados y presentación
+
+El corte F54 añade resúmenes públicos de la exportación F55 y el guion aprobado para la presentación de 10 minutos.
+
+En este checkout limpio, compileall terminó correctamente y la suite existente pasó 91/91 pruebas. La actualización no entrena sobre datos privados ni añade resultados por pliegue.
+
+El procedimiento local seleccionado para posición temporal obtuvo Macro-F1 0,7164 ± 0,1465, ROC-AUC macro OvR 0,9170 ± 0,0671 y PR-AUC macro 0,8704 ± 0,0976 en 15 pliegues agrupados por participante. La etiqueta corresponde a los tercios inicial, medio y final de cada grabación, no a fatiga. El resultado F31 histórico de la misma tarea informa Macro-F1 0,740; ambos cortes se conservan con su procedencia y la diferencia entre ellos no se reconcilió en este cambio.
+
+Borg (esfuerzo percibido de hombro, RPE ≥17) obtuvo Macro-F1 0,5787 ± 0,1344, ROC-AUC 0,7872 ± 0,1147 y PR-AUC 0,7900 ± 0,0934 en 34 pliegues. Cerqueira (auto-reporte ordinal de miembro superior, 0/1/2) obtuvo 0,3682 ± 0,0905, 0,6322 ± 0,0474 y 0,4576 ± 0,0494, respectivamente, en 13 pliegues. Su comparador diagnóstico de tiempo/tarea obtuvo 0,7135 ± 0,0834 de Macro-F1 y no es el predictor EMG ni un modelo desplegable. Las tres tareas no son comparables entre sí como si midieran el mismo fenómeno y ninguna valida fatiga del cuádriceps.
+
+Se publican 36 filas agregadas por tarea, modelo y configuración y 36 matrices de confusión agregadas: [métricas por modelo](reports/F55_METRICS_AGGREGATED_PUBLIC.csv) y [matrices de confusión](reports/F55_CONFUSION_COUNTS_AGGREGATED_PUBLIC.csv). El CSV de 625 filas por pliegue y su manifiesto con rutas privadas no se publican. R1–R5, comparación bilateral y filtros conservan los resultados agregados ya publicados, sin recálculo en F54.
+
+La presentación Canva “Defensa sEMG cuádriceps” quedó guardada y aprobada con 10 diapositivas. Se incluye el guion hablado en inglés: 1.238 palabras y tiempos asignados que suman 10:00 (aproximadamente 124 palabras/minuto según el conteo textual). La exportación del diseño no se incorpora al repositorio.
+
+El DOCX completo más reciente queda fuera del paquete público porque incluye identidades de autor y resultados por grupo de participante. El informe público F31 continúa siendo histórico.
 
 ## Verificación actual F52
 
@@ -75,7 +91,8 @@ Para la señal centrada de cada ventana, RMS = sqrt((1/N) sum x_c[n]^2). Se esti
 - `src/cerqueira/`: cinco módulos separados para auditoría de alineación, extracción, LOSO e inferencia del objetivo de auto-reporte ordinal de miembro superior; sus productos deben mantenerse privados.
 - `bibliografia/`: las 44 referencias consolidadas en dos archivos BibTeX, sin cambios.
 - `datasets/README.md`: organización local segura; no incluye datos.
-- `reports/`: informe IEEE público F31, resumen y heatmap agregado por pierna/serie, nota metodológica y auditoría del paquete.
+- reports/: informe IEEE público F31, agregados F55, estado F54, resumen y heatmap por pierna/serie, nota metodológica y auditoría.
+- presentation/: guion hablado aprobado para la presentación Canva de 10 minutos.
 - `manifest/SHA256SUMS`: hashes del paquete.
 
 El manifiesto contiene los SHA-256 de los bytes versionados de cada archivo rastreado, excepto el propio manifiesto. Así los hashes permanecen estables aunque un checkout de Windows convierta finales de línea LF/CRLF.
