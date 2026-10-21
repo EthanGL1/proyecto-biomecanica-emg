@@ -1,3 +1,19 @@
+# Auditoría del paquete público EMG — corte actual F50.9
+
+## Verificación actual F50.9
+
+Este corte sigue al commit F50.8 `15bd1fafb02b2ca532b0d29ee7bad0bb47141b79` en la rama pública `main`. El repositorio permanece público. La actualización agrega un estado de verificación y corrige la descripción del PDF y del estado del escaneo; no agrega código, señales, pesos de modelo ni filas por sujeto.
+
+- El snapshot F50.8 tenía 53 archivos: el manifiesto enumeraba 52 cargas útiles y se excluía a sí mismo. F50.9 agrega un archivo de estado; el árbol esperado queda en 54 archivos y el manifiesto enumera 53. Se actualizaron los hashes de README y de esta auditoría y se añadió el hash del nuevo estado.
+- La suite local verificable dio 86/86 pruebas aprobadas; `compileall` devolvió 0; las interfaces de ayuda devolvieron 0. La demo sintética produjo las diez exportaciones previstas y dejó explícito `fatigue_target: none` y abstención supervisada.
+- El checkpoint Cerqueira full-fit privado cargó y ejecutó cinco ventanas sintéticas con probabilidades válidas. La prueba es de serialización/preprocesamiento/CLI; no es evaluación etiquetada ni generalización. El checkpoint y sus salidas no se publican.
+- El manuscrito F50.9 compiló en el editor integrado, pero no existe PDF exportado, páginas contadas ni revisión visual. El intento local de exportación fue bloqueado por Device Guard (error 4551).
+- El escaneo formal Codex Security no se cerró: Windows Application Control impidió cargar una extensión nativa del ayudante; no hay informe sellado ni afirmación de cero hallazgos.
+
+**Conclusión actual:** la publicación es intermedia y privada en datos. La demo de software funciona, pero no sustituye la inferencia del modelo sobre datos etiquetados ni valida fatiga del cuádriceps. El informe se mantiene abierto hasta que se exporte e inspeccione el PDF y se complete la revisión formal de seguridad en un entorno permitido.
+
+## Registro histórico F50.8 conservado
+
 # Auditoría del paquete público EMG — estado verificado al 20 de octubre de 2026
 
 **Estado de liberación:** intermedio, sin señales privadas en el paquete y todavía no final científico. Este checkout parte de `origin/main` `da04af2cbc653a6849726b4b9119af0f3474cd41`. La actualización de código y pruebas se publicó en `1937a53f5bd780b9592ae216ed2b3a0f5888743b`; después del envío, `git ls-remote` coincidió con ese SHA. Esta auditoría se actualiza con los resultados de esa publicación. Los SHAs `a9a…` y `c6f…` de párrafos históricos identifican snapshots anteriores.
