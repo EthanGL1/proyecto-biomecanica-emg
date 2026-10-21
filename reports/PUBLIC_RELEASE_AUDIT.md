@@ -1,6 +1,20 @@
-# Auditoría del paquete público EMG — corte actual F50.9
+# Auditoría del paquete público EMG — corte actual F51
 
-## Verificación actual F50.9
+## Verificación actual F51
+
+El corte F51 parte del main público F50.9 (a5966d46d3b683b024e738be68440c545a52f4a2). El paquete mantiene visibilidad pública y separa el código de las señales y resultados individuales.
+
+- En un runtime Python 3.12.14, 86/86 pruebas, compileall, ayuda CLI y demo sintética terminaron correctamente.
+- Un smoke privado de una copia de R1 real verificó señal completa, un fragmento, reensamblado de tres fragmentos, un hueco artificial y rechazo de duplicado. Completa y reensamblado produjeron las mismas seis tablas, eventos y tablero. El resumen público incluye conteos agregados, no la señal, los archivos resultantes ni rutas personales.
+- El control de hueco omitió intencionalmente 40 muestras y preservó un salto de 41 ms en dos tramos. No representa una anomalía observada en la grabación original.
+- La prueba no equivale a evaluación de los 138 registros, no carga un modelo y no confirma fisiología o fatiga.
+- No se añadieron señales, salidas por participante, checkpoints, credenciales ni el manuscrito completo. La figura individual Cerqueira F51 sigue privada.
+
+Conclusión: el paquete demuestra ejecución del procesador EMG descriptivo para un archivo real y consistencia de reensamblado. La entrega pública sigue intermedia: el PDF actual no se exportó ni inspeccionó y Codex Security no produjo un informe formal.
+
+## Registro histórico F50.9 conservado
+
+### Verificación F50.9
 
 Este corte sigue al commit F50.8 `15bd1fafb02b2ca532b0d29ee7bad0bb47141b79` en la rama pública `main`. El repositorio permanece público. La actualización agrega un estado de verificación y corrige la descripción del PDF y del estado del escaneo; no agrega código, señales, pesos de modelo ni filas por sujeto.
 

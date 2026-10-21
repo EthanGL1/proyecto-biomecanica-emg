@@ -1,20 +1,21 @@
-# Análisis EMG — paquete público reproducible F50.9 (actualización intermedia, 20 de octubre de 2026)
+# Análisis EMG — paquete público reproducible F51 (actualización intermedia, 20 de octubre de 2026)
 
 Este repositorio reúne código de procesamiento, pruebas, bibliografía y resultados agregados autorizados. El informe DOCX/PDF F31 que permanece en `reports/` es histórico y corresponde a un benchmark de posición temporal; no es el manuscrito F50 para revisión ni una versión final del estudio.
 
-El [estado público F50.9 (intermedio)](reports/F50.9_STATUS_20261020.md) incorpora verificaciones de la demo EMG sintética, la CLI full-fit y el estado real del manuscrito y la revisión de seguridad. Los estados [F50.8](reports/F50.8_STATUS_20261020.md), [F50.7](reports/F50.7_STATUS_20261020.md), [F50.6](reports/F50.6_STATUS_20261020.md) y [F50.5](reports/F50.5_STATUS_20261020.md) se conservan como historia.
+El [estado público F51 (intermedio)](reports/F51_STATUS_20261020.md) incorpora la prueba del procesamiento de una grabación R1 real completa y reensamblada desde fragmentos, junto con el control de huecos. El estado [F50.9](reports/F50.9_STATUS_20261020.md) y los cortes anteriores se conservan como historia.
 
 El análisis fisiológico principal usa las grabaciones locales de cuádriceps y no confirma fatiga ni pérdida de fuerza. El benchmark Borg es un experimento separado de esfuerzo percibido en EMG de hombro. Cerqueira es una tercera rama para el auto-reporte ordinal de miembro superior: se reprodujo internamente una inferencia de pliegue retenido, pero el diagnóstico temporal/de tarea supera al predictor EMG y no se recomienda un modelo EMG para despliegue.
 
 Este paquete público no contiene señales, HTML con señales embebidas, resultados por participante/ventana, datos de identificación, checkpoints ni inferencias individuales. La ruta pública descriptiva no carga un clasificador: ahora señala explícitamente la abstención y conserva los productos EMG descriptivos. El modelo Borg congelado no se publica: la carga e inferencia reproducibles siguen bloqueadas por el runtime autorizado.
 
-## Corte de verificación F50.9
+## Corte de verificación F51
 
 ## Verificaciones realizadas
 
 - La suite pública ejecutó **86/86 pruebas aprobadas** con Python 3.12.14. La compilación de `src` y `tests` mediante `compileall` finalizó con código 0.
 - Las interfaces `--help` del entrenamiento Cerqueira LOSO y de la inferencia de ensayo devolvieron código 0.
 - La demo pública `--demo --dashboard` generó diez archivos descriptivos desde una señal sintética determinista: máscara, características, eventos candidatos, FFT, PSD, STFT, segmentos, señal sintética, resumen y tablero HTML. El resumen registra 10/10 tramos procesados, 200 ventanas y `fatigue_target: none`; no leyó grabaciones del estudio y no emitió predicciones supervisadas.
+- Una comprobación privada del pipeline usó una copia local de dos columnas de una grabación R1 real. El procesamiento completo y su reensamblado de tres fragmentos coincidieron en las seis tablas centrales, eventos candidatos y tablero; un hueco artificial de 40 muestras se conservó como dos tramos y un fragmento duplicado fue rechazado. Se procesaron 30.946 muestras, con 59 ventanas de tiempo por cada una de cinco ramas de filtro y 28 eventos candidatos. La señal y sus productos individuales no se publican. Esta prueba no valida la cohorte completa, las etiquetas, las repeticiones mecánicas ni la detección fisiológica de fatiga.
 - En almacenamiento privado y con el runtime autorizado se cargó el checkpoint Cerqueira full-fit existente y se ejecutó la CLI sobre una entrada sintética de cuatro canales. Produjo cinco ventanas de 1 s no solapadas; sus probabilidades fueron finitas, estuvieron entre 0 y 1 y sumaron uno dentro de 1e-12. El resultado de clase 0 en esas cinco ventanas solo acredita ejecución técnica con entrada artificial. El checkpoint, la entrada, las filas de salida y el recibo íntegro no se publican. No se estima rendimiento ni se demuestra generalización, calibración o fatiga fisiológica.
 - La fuente LaTeX privada F50.9 compiló con éxito en el editor integrado de Codex. No se exportó un PDF: al intentar usar Tectonic, Windows Device Guard bloqueó el ejecutable con error 4551. La paginación de 15–20 páginas y la inspección visual página por página siguen sin verificarse.
 - El escaneo formal de Codex Security permanece incompleto: Windows Application Control bloqueó la extensión nativa del ayudante local antes de generar el informe. No se declara resultado de cero hallazgos.
