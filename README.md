@@ -1,4 +1,4 @@
-# Análisis EMG — paquete público reproducible F54 (actualización intermedia, 21 de octubre de 2026)
+# Análisis EMG — paquete público reproducible F54 
 
 ## Actualizacion F56 - visor y estado de auditoria
 
@@ -235,6 +235,5 @@ No hay entradas ni evaluación de Borg/RPE en el paquete. Tampoco se publica un 
 
 ## Límites y uso
 
-La guía prescribe salida RAW y muestreo mínimo de 1 kHz por canal, además de ubicación de electrodos sobre recto femoral y ejercicio unilateral al 70 % de 1RM; esto define el protocolo objetivo, no certifica la adquisición de cada CSV. El intervalo mediano de timestamps es cercano a 1 ms (aproximadamente 1 kHz nominal), pero no identifica el reloj físico ni el ancho de banda analógico. En el archivo no se verifican por registro la modalidad RAW/RECT/ENV, calibración, sitio real del electrodo, carga, pausas, cadencia o repeticiones mecánicas. `Voltage_mV` reproduce una transformación aritmética de `ADC_Value`, no una calibración física validada. Por tanto, la conclusión correcta es que el estudio se dirige a un grupo muscular y ejercicio específicos, mientras los resultados disponibles describen tendencias del canal guardado y una tarea proxy; no demuestran fatiga fisiológica del recto femoral.
+La guía prescribe salida RAW y muestreo mínimo de 1 kHz por canal, además de ubicación de electrodos sobre recto femoral y ejercicio unilateral al 70 % de 1RM; esto define el protocolo objetivo, no certifica la adquisición de cada CSV. El intervalo mediano de timestamps es cercano a 1 ms (aproximadamente 1 kHz nominal). En el archivo no se verifican por registro del sitio real del electrodo, carga, pausas, cadencia o repeticiones mecánicas. `Voltage_mV` reproduce una transformación aritmética de `ADC_Value`, la conclusión correcta es que el estudio se dirige a un grupo muscular y ejercicio específicos, mientras los resultados disponibles describen tendencias del canal guardado.
 
-No se agregó una licencia: no se han verificado los derechos para otorgarla. El acceso a datos sigue sujeto a autorización, consentimiento y aprobación ética aplicable.
