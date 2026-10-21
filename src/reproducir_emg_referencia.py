@@ -840,6 +840,48 @@ def read_signal_csv(
     }
 
 
+def read_signal_fragments(
+    paths: Iterable[Path],
+    *,
+    series_override: str | None = None,
+) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Reassemble single-recording CSV fragments without altering timestamps.
+
+    Each fragment follows :func:`read_signal_csv`'s strict canonical or local
+    source schema. Source-schema files require an explicit series. Fragments
+    may be passed in any order; timestamps are sorted within each series, while
+    overlap and duplicate samples are rejected and genuine gaps are preserved.
+    """
+
+    fragment_paths = [Path(path) for path in paths]
+    if not fragment_paths:
+        raise ValueError("at least one signal fragment CSV is required")
+    pieces: dict[str, list[tuple[np.ndarray, np.ndarray]]] = {}
+    for path in fragment_paths:
+        fragment = read_signal_csv(path, series_override=series_override)
+        for series, (times, values) in fragment.items():
+            pieces.setdefault(series, []).append((times, values))
+
+    recordings: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for series in SERIES:
+        if series not in pieces:
+            continue
+        series_pieces = pieces[series]
+        times = np.concatenate([piece[0] for piece in series_pieces])
+        values = np.concatenate([piece[1] for piece in series_pieces])
+        order = np.argsort(times, kind="stable")
+        times = times[order]
+        values = values[order]
+        if np.any(np.diff(times) <= 0):
+            raise ValueError(
+                f"input fragments overlap or duplicate timestamp within series {series}"
+            )
+        recordings[series] = (times, values)
+    if not recordings:
+        raise ValueError("signal fragments contain no R1-R5 samples")
+    return recordings
+
+
 def read_cohort_signal_csv(
     path: Path,
 ) -> dict[tuple[str, str, str], tuple[np.ndarray, np.ndarray]]:
@@ -1081,6 +1123,7 @@ def main(argv: list[str] | None = None) -> int:
             "Esquemas para --input:\n"
             "  Canonico: series,time_s,adc_value\n"
             "  Fuente local: Relative_Time_s,ADC_Value[,Voltage_mV]; requiere --series R1-R5.\n"
+            "  --input-fragments acepta varios CSV del mismo esquema y conserva huecos temporales.\n"
             "  Voltage_mV se ignora; no se asume calibracion fisica.\n\n"
             "Ejemplo publico sintetico (no usa grabaciones del estudio):\n"
             "  python src\\reproducir_emg_referencia.py --demo --output-dir <PRIVATE_TEMP> --overwrite"
@@ -1091,6 +1134,12 @@ def main(argv: list[str] | None = None) -> int:
         "--input",
         type=Path,
         help="single-record CSV using the canonical or explicit local-source schema",
+    )
+    source.add_argument(
+        "--input-fragments",
+        type=Path,
+        nargs="+",
+        help="one or more single-record CSV fragments with original timestamps; overlaps are rejected",
     )
     source.add_argument(
         "--cohort-input",
@@ -1116,8 +1165,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dashboard-side", choices=SIDES, help="side to show in the dashboard for cohort inputs")
     parser.add_argument("--dashboard-series", choices=SERIES, help="series to show in the dashboard for cohort inputs")
     args = parser.parse_args(argv)
-    if args.series is not None and args.input is None:
-        parser.error("--series can only be used with --input")
+    if args.series is not None and args.input is None and args.input_fragments is None:
+        parser.error("--series can only be used with --input or --input-fragments")
     dashboard_selection = (args.dashboard_subject, args.dashboard_side, args.dashboard_series)
     if any(value is not None for value in dashboard_selection):
         if not args.dashboard or args.cohort_input is None and args.cohort_fragments is None:
@@ -1130,8 +1179,12 @@ def main(argv: list[str] | None = None) -> int:
     checkout_root = Path(__file__).resolve().parents[1]
     path_values: dict[str, object] = {"output_dir": args.output_dir}
     fragment_names: list[str] = []
+    raw_fragment_names: list[str] = []
     if args.input is not None:
         path_values["input"] = args.input
+    elif args.input_fragments is not None:
+        raw_fragment_names = [f"input_fragment_{index}" for index in range(len(args.input_fragments))]
+        path_values.update(dict(zip(raw_fragment_names, args.input_fragments)))
     elif args.cohort_input is not None:
         path_values["cohort_input"] = args.cohort_input
     elif args.cohort_fragments is not None:
@@ -1140,6 +1193,7 @@ def main(argv: list[str] | None = None) -> int:
     paths = validate_data_paths(path_values, checkout_root)
     selected_inputs = (
         [paths["input"]] if args.input is not None else
+        [paths[name] for name in raw_fragment_names] if args.input_fragments is not None else
         [paths["cohort_input"]] if args.cohort_input is not None else
         [paths[name] for name in fragment_names]
     )
@@ -1159,7 +1213,22 @@ def main(argv: list[str] | None = None) -> int:
         )
         result.summary["data_scope"] = "synthetic fixtures only; no study results are reproduced and no cohort data are used"
     else:
-        if args.cohort_fragments is not None:
+        if args.input_fragments is not None:
+            recordings = read_signal_fragments(selected_inputs, series_override=args.series)
+            result = analyze_arrays(recordings, include_traces=args.dashboard)
+            result.summary["input_source"] = "csv_fragments"
+            result.summary["fragment_file_count"] = len(selected_inputs)
+            result.summary["sample_count"] = sum(len(times) for times, _ in recordings.values())
+            result.summary["gap_count"] = sum(
+                max(0, len(split_contiguous_runs(times)) - 1)
+                for times, _ in recordings.values()
+            )
+            result.summary["data_scope"] = (
+                "caller-supplied single-recording CSV fragments reassembled by series and original timestamps; "
+                "overlaps rejected and timestamp gaps retained without interpolation; "
+                "no cohort-level study results are computed"
+            )
+        elif args.cohort_fragments is not None:
             recordings = read_cohort_signal_fragments(selected_inputs)
             result = analyze_cohort_arrays(recordings, include_traces=args.dashboard, trace_key=trace_key)
             result.summary["input_source"] = "cohort_fragments"

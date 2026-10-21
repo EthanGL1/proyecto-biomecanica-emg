@@ -13,6 +13,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+import reproducir_emg_referencia as emg_pipeline  # noqa: E402
 from reproducir_emg_referencia import (  # noqa: E402
     analyze_arrays,
     analyze_cohort_arrays,
@@ -619,6 +620,107 @@ class PublicEmgPipelineTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "overlap or duplicate timestamp"):
                 read_cohort_signal_fragments([first, second])
+
+    def test_source_signal_fragments_reassemble_in_time_order_and_preserve_gaps(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = root / "raw_first.csv"
+            second = root / "raw_second.csv"
+            first.write_text(
+                "Relative_Time_s,ADC_Value,Voltage_mV\n"
+                "0.000,10,unverified\n"
+                "0.001,-11,unverified\n",
+                encoding="utf-8",
+            )
+            second.write_text(
+                "Relative_Time_s,ADC_Value,Voltage_mV\n"
+                "0.010,12,unverified\n"
+                "0.011,-13,unverified\n",
+                encoding="utf-8",
+            )
+
+            reader = getattr(emg_pipeline, "read_signal_fragments", None)
+            self.assertTrue(callable(reader), "raw source-schema fragment reader is not implemented")
+            if reader is None:
+                return
+            merged = reader([second, first], series_override="R4")
+
+        times, values = merged["R4"]
+        self.assertEqual(times.tolist(), [0.0, 0.001, 0.01, 0.011])
+        self.assertEqual(values.tolist(), [10.0, -11.0, 12.0, -13.0])
+        self.assertEqual(split_contiguous_runs(times), [(0, 2), (2, 4)])
+
+    def test_source_signal_fragments_reject_overlapping_or_duplicate_timestamps(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = root / "first.csv"
+            overlap = root / "overlap.csv"
+            first.write_text(
+                "Relative_Time_s,ADC_Value\n0.000,1\n0.001,2\n",
+                encoding="utf-8",
+            )
+            overlap.write_text(
+                "Relative_Time_s,ADC_Value\n0.001,2\n0.002,3\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "overlap or duplicate timestamp"):
+                reader = getattr(emg_pipeline, "read_signal_fragments", None)
+                self.assertTrue(callable(reader), "raw source-schema fragment reader is not implemented")
+                if reader is None:
+                    return
+                reader([first, overlap], series_override="R1")
+
+    def test_cli_source_signal_fragments_match_single_raw_file_processing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            full = root / "recording.csv"
+            first = root / "fragment_01.csv"
+            second = root / "fragment_02.csv"
+            times = np.arange(6000, dtype=float) / 1000.0
+            times[3000:] += 0.020
+            values = 17.0 * np.sin(2.0 * np.pi * 83.0 * times) - 4.0 * np.sin(2.0 * np.pi * 9.0 * times)
+
+            def write_source(path, start, stop):
+                with path.open("w", newline="", encoding="utf-8") as handle:
+                    writer = csv.writer(handle)
+                    writer.writerow(("Relative_Time_s", "ADC_Value", "Voltage_mV"))
+                    writer.writerows(
+                        (f"{times[index]:.9f}", f"{values[index]:.12f}", "not_calibrated")
+                        for index in range(start, stop)
+                    )
+
+            write_source(full, 0, len(times))
+            write_source(first, 0, 3000)
+            write_source(second, 3000, len(times))
+            whole_output = root / "whole_output"
+            fragment_output = root / "fragment_output"
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(["--input", str(full), "--series", "R2", "--output-dir", str(whole_output)]),
+                    0,
+                )
+            fragment_run = subprocess.run(
+                [sys.executable, str(ROOT / "src" / "reproducir_emg_referencia.py"),
+                 "--input-fragments", str(second), str(first), "--series", "R2",
+                 "--output-dir", str(fragment_output)],
+                cwd=ROOT, check=False, capture_output=True, text=True,
+            )
+            self.assertEqual(fragment_run.returncode, 0, fragment_run.stderr)
+
+            for filename in ("segments.csv", "mask.csv", "features.csv", "fft.csv", "psd.csv", "stft.csv"):
+                self.assertEqual(
+                    (fragment_output / filename).read_bytes(),
+                    (whole_output / filename).read_bytes(),
+                    filename,
+                )
+            summary = json.loads((fragment_output / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["input_source"], "csv_fragments")
+            self.assertEqual(summary["fragment_file_count"], 2)
+            self.assertEqual(summary["sample_count"], 6000)
+            self.assertEqual(summary["gap_count"], 1)
+            self.assertEqual(summary["runs_total"], 2)
 
     def test_cli_fragment_reassembly_matches_whole_recording_outputs(self):
         with tempfile.TemporaryDirectory() as temporary:
