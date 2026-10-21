@@ -1,8 +1,10 @@
-# Análisis EMG — paquete público reproducible F52 (actualización intermedia, 20 de octubre de 2026)
+# Análisis EMG — paquete público reproducible F53 (actualización intermedia, 21 de octubre de 2026)
 
 Este repositorio reúne código de procesamiento, pruebas, bibliografía y resultados agregados autorizados. El informe DOCX/PDF F31 de reports/ es histórico; no es la versión privada editable del manuscrito para revisión ni un artículo final aprobado.
 
 El estado público F52 (reports/F52_STATUS_20261020.md) documenta la entrada directa de fragmentos CSV crudos, las pruebas, la demostración y los límites vigentes. Los cortes F51, F50.9 y anteriores se conservan como historia.
+
+La corrección F53 reconcilia el objetivo definido por la guía docente con lo que puede confirmarse en los CSV locales. Consulta [la nota de protocolo F53](reports/F53_PROTOCOL_RECONCILIATION.md) antes de interpretar los resultados: la guía sí especifica recto femoral durante extensión unilateral de rodilla; el archivo de señales no demuestra por sí solo que cada canal se adquirió en ese sitio ni que todos los parámetros previstos se ejecutaron.
 
 ## Verificación actual F52
 
@@ -14,7 +16,7 @@ El estado público F52 (reports/F52_STATUS_20261020.md) documenta la entrada dir
 
 ## Alcance científico vigente
 
-El análisis local de cuádriceps es descriptivo: sus grabaciones no cuentan con etiquetas independientes y sincronizadas de fatiga, fuerza/torque medidos ni repetición mecánica verificada. Las marcas de actividad son candidatas; no establecen nivel, inicio o pico fisiológico de fatiga.
+El objetivo local previsto es la sEMG del recto femoral (rectus femoris), parte del cuádriceps, durante extensión unilateral de rodilla, según la guía docente. El inventario local comprende 15 grupos derivados de nombres de archivo, con 138 grabaciones formales R1–R5 y dos registros R0/R0_1 reservados para control de calidad. El análisis de las señales es descriptivo: el archivo no incluye una etiqueta independiente y sincronizada de fatiga, fuerza/torque medidos ni marcadores mecánicos de repetición. Las marcas de actividad son candidatas; no establecen nivel, inicio o pico fisiológico de fatiga. La guía define el músculo y el protocolo previsto, pero los CSV no verifican individualmente el sitio del electrodo, la carga ejecutada, la fase/cadencia, la modalidad efectiva del canal o la causa de terminación.
 
 Borg corresponde a esfuerzo percibido de hombro y no produjo una inferencia reproducible en el runtime autorizado disponible. Cerqueira corresponde a auto-reporte ordinal de fatiga autopercibida de miembro superior; su validación por sujeto es interna a ese corpus y el diagnóstico de tiempo/tarea supera al predictor EMG. Ninguna rama permite transferir predicciones a cuádriceps.
 
@@ -207,6 +209,6 @@ No hay entradas ni evaluación de Borg/RPE en el paquete. Tampoco se publica un 
 
 ## Límites y uso
 
-No se verificaron  carga, pausas, cadencia . Por tanto, esta investigación describe tendencias del canal guardado y desempeño de una tarea proxy, no impacto de un grupo muscular específico ni fatiga confirmada.
+La guía prescribe salida RAW y muestreo mínimo de 1 kHz por canal, además de ubicación de electrodos sobre recto femoral y ejercicio unilateral al 70 % de 1RM; esto define el protocolo objetivo, no certifica la adquisición de cada CSV. El intervalo mediano de timestamps es cercano a 1 ms (aproximadamente 1 kHz nominal), pero no identifica el reloj físico ni el ancho de banda analógico. En el archivo no se verifican por registro la modalidad RAW/RECT/ENV, calibración, sitio real del electrodo, carga, pausas, cadencia o repeticiones mecánicas. `Voltage_mV` reproduce una transformación aritmética de `ADC_Value`, no una calibración física validada. Por tanto, la conclusión correcta es que el estudio se dirige a un grupo muscular y ejercicio específicos, mientras los resultados disponibles describen tendencias del canal guardado y una tarea proxy; no demuestran fatiga fisiológica del recto femoral.
 
-
+No se agregó una licencia: no se han verificado los derechos para otorgarla. El acceso a datos sigue sujeto a autorización, consentimiento y aprobación ética aplicable.
