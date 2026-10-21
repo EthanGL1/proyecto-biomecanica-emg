@@ -1,5 +1,14 @@
 # Análisis EMG — paquete público reproducible F54 (actualización intermedia, 21 de octubre de 2026)
 
+## Actualizacion F56 - visor y estado de auditoria
+
+F56 corrige la comprobacion de disponibilidad de DecompressionStream del visor: los navegadores compatibles ahora decodifican el payload y los que no lo soportan muestran el aviso existente antes de inicializar la interfaz. Se agrego una prueba de regresion para ambas ramas.
+
+La verificacion local de esta revision obtuvo 92/92 pruebas, compilacion Python correcta, prueba de ejecucion JavaScript con la API presente y ausente, y git diff --check sin errores. La revision cruzada del codigo no encontro otro problema en este cambio. El escaneo formal Codex Security quedo sin resultado final porque el control de aplicaciones bloqueo el modulo nativo al registrar el inventario; no se afirma una auditoria formal sin hallazgos.
+
+F56 no cambia datos, resultados, etiquetas, modelos ni metricas. Se mantienen los limites cientificos y de privacidad descritos en este README.
+
+
 Este repositorio reúne código de procesamiento, pruebas, bibliografía y resultados agregados autorizados. El informe DOCX/PDF F31 de reports/ es histórico; no es la versión privada editable del manuscrito para revisión ni un artículo final aprobado.
 
 El estado público F52 (reports/F52_STATUS_20261020.md) documenta la entrada directa de fragmentos CSV crudos, las pruebas, la demostración y los límites vigentes. Los cortes F51, F50.9 y anteriores se conservan como historia.

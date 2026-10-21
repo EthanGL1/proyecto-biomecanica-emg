@@ -77,6 +77,19 @@ class EmgDashboardTests(unittest.TestCase):
         self.assertEqual(payload["psd"][0]["psd_adc2_per_hz"], 0.25)
         self.assertNotIn("subject_id", json.dumps(payload))
 
+    def test_dashboard_checks_decompression_api_with_correct_polarity(self):
+        traces, features, stft, segments = self._example_rows()
+        html = render_dashboard_html(traces, features, stft, segments)
+
+        self.assertIn(
+            'if(typeof DecompressionStream!=="function")throw new Error("unsupported browser")',
+            html,
+        )
+        self.assertNotIn(
+            'if(!(typeof DecompressionStream!=="function"))',
+            html,
+        )
+
     def test_candidate_activity_uses_filtered_rms_and_splits_on_gaps(self):
         traces = []
         fs = 1000.0
