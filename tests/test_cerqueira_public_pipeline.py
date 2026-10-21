@@ -388,6 +388,28 @@ class CerqueiraPublicPipelineTests(unittest.TestCase):
             with self.assertRaises(model_tools.CerqueiraModelError):
                 model_tools.load_fold_model_bundle(model_path, manifest_path)
 
+    def test_fold_model_loader_rejects_nonzero_overlap_not_supported_by_extractor(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            model_path, manifest_path = self._write_synthetic_fold(root)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["feature_extraction"]["window_overlap_fraction"] = 0.25
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaisesRegex(model_tools.CerqueiraModelError, "non-overlapping"):
+                model_tools.load_fold_model_bundle(model_path, manifest_path)
+
+    def test_final_model_loader_rejects_nonzero_overlap_not_supported_by_extractor(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            model_path, manifest_path = self._write_synthetic_final_model(root)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["feature_extraction"]["window_overlap_fraction"] = 0.25
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaisesRegex(model_tools.CerqueiraModelError, "non-overlapping"):
+                model_tools.load_final_model_bundle(model_path, manifest_path)
+
     def test_training_rejects_oversized_feature_csv_before_hashing(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -690,6 +690,8 @@ def load_fold_model_bundle(model_path: str | Path, fold_manifest_path: str | Pat
     if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value))
            for value in numeric_contract):
         raise CerqueiraModelError("Fold manifest feature-extraction numbers must be finite")
+    if overlap_fraction != 0.0:
+        raise CerqueiraModelError("Model inference supports non-overlapping complete windows only")
     if (
         sampling_hz <= 0
         or not 0 <= sampling_tolerance < 0.25
@@ -849,6 +851,8 @@ def load_final_model_bundle(model_path: str | Path, final_manifest_path: str | P
         for value in numeric_contract
     ):
         raise CerqueiraModelError("Final model feature-extraction numbers must be finite")
+    if overlap_fraction != 0.0:
+        raise CerqueiraModelError("Model inference supports non-overlapping complete windows only")
     if (
         sampling_hz <= 0
         or not 0 <= sampling_tolerance < 0.25
