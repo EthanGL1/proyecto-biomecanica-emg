@@ -40,7 +40,7 @@ El checkpoint Borg esperado en el recibo anterior continúa ausente y, en cualqu
 
 1. Ejecutar la inferencia descriptiva con el ZIP independiente de dos pacientes y verificar estructura/etiquetas, sin ajustar el sistema con ese conjunto.
 2. Conseguir referencias mecánicas sincronizadas para validar conteos de repeticiones y etiquetas independientes para validar fatiga; de otro modo, mantener los resultados como eventos y tendencias exploratorias de señal.
-3. Resolver los pendientes de seguridad/operación antes de procesar ZIPs hostiles o publicar una entrega final. La rama F57 aún no se ha subido ni fusionado.
+3. La rama F57 se publicó como `f57-oneclick-zip-analysis`; el PR #3 está abierto y se puede fusionar, pero aún no se ha integrado en `main`. Resolver los pendientes de seguridad/operación antes de procesar ZIPs hostiles o declarar la entrega integral.
 4. La presentación y el guion ya fueron actualizados con evidencia disponible; incorporar resultados de los dos pacientes solo cuando se suministre un ZIP autorizado y compatible. No llamar a esa ejecución validación de fatiga sin etiquetas independientes.
 
 No se incluyen datos crudos, salidas por grabación, checkpoints, participantes ni predicciones individuales en esta rama.
