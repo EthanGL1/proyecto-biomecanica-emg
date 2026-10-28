@@ -266,6 +266,7 @@ def _derive_spectral_threshold_screen(
 
     def display_status(status: str) -> str:
         return {
+            "baseline_reference": "Baseline reference (not verified optimal or fatigue-free)",
             "fatigue_compatible_change_exploratory": "Fatigue-compatible spectral change (exploratory; not confirmed)",
             "no_sustained_threshold_crossing": "No sustained spectral threshold crossing (not proof of no fatigue)",
             "not_evaluable": "Not evaluable",
@@ -396,8 +397,9 @@ def _derive_spectral_threshold_screen(
                 grouped_by_run.setdefault(str(feature.get("run_index", "")), []).append(feature)
             for run_features in grouped_by_run.values():
                 run_features.sort(key=lambda item: item["time_s_value"])
-                below_both: list[bool] = []
                 for feature in run_features:
+                    if not feature["nonoverlap_window_used"]:
+                        continue
                     active = feature["activity_overlap_fraction"] >= min_activity_occupancy
                     spectral_finite = feature["mdf_value"] is not None and feature["mnf_value"] is not None
                     if not thresholds_ready:
@@ -414,21 +416,32 @@ def _derive_spectral_threshold_screen(
                         mnf_below = float(feature["mnf_value"]) < float(mnf_lower)
                         feature["below_mdf_threshold"] = mdf_below
                         feature["below_mnf_threshold"] = mnf_below
-                        feature["screen_status"] = "isolated_threshold_crossing" if mdf_below and mnf_below else "no_sustained_threshold_crossing"
-                        feature["screen_reason"] = "joint_frequency_crossing_not_persistent" if mdf_below and mnf_below else "both_frequencies_not_below_their_thresholds"
-                    below_both.append(bool(feature["below_mdf_threshold"] and feature["below_mnf_threshold"]))
+                        if feature["proxy"] == phases[0][1]:
+                            feature["screen_status"] = "baseline_reference"
+                            feature["screen_reason"] = "baseline_reference_not_scored_as_fatigue_outcome"
+                        else:
+                            feature["screen_status"] = "isolated_threshold_crossing" if mdf_below and mnf_below else "no_sustained_threshold_crossing"
+                            feature["screen_reason"] = "joint_frequency_crossing_not_persistent" if mdf_below and mnf_below else "both_frequencies_not_below_their_thresholds"
+
+                # The first third defines the baseline, so it is not tested against itself.
+                # Persistence is evaluated within each later phase and continuous run; a crossing
+                # cannot be completed using windows from the baseline or another phase.
                 if thresholds_ready:
-                    for crossing in sustained_crossings(
-                        below_both,
-                        [int(feature["screen_segment_id"]) for feature in run_features],
-                        min_consecutive=3,
-                    ):
-                        start = crossing["start_window_index"]
-                        stop = start + crossing["duration_windows"]
-                        for feature in run_features[start:stop]:
-                            feature["sustained_crossing"] = True
-                            feature["screen_status"] = "fatigue_compatible_change_exploratory"
-                            feature["screen_reason"] = "both_mdf_and_mnf_below_threshold_for_three_consecutive_nonoverlapping_windows"
+                    for proxy in (phase[1] for phase in phases[1:]):
+                        phase_run_features = [feature for feature in run_features if feature["proxy"] == proxy]
+                        below_both = [bool(feature["below_mdf_threshold"] and feature["below_mnf_threshold"])
+                                      for feature in phase_run_features]
+                        for crossing in sustained_crossings(
+                            below_both,
+                            [int(feature["screen_segment_id"]) for feature in phase_run_features],
+                            min_consecutive=3,
+                        ):
+                            start = crossing["start_window_index"]
+                            stop = start + crossing["duration_windows"]
+                            for feature in phase_run_features[start:stop]:
+                                feature["sustained_crossing"] = True
+                                feature["screen_status"] = "fatigue_compatible_change_exploratory"
+                                feature["screen_reason"] = "both_mdf_and_mnf_below_threshold_for_three_consecutive_nonoverlapping_windows_within_phase"
 
             for feature in branch_features:
                 if not feature["nonoverlap_window_used"]:
@@ -465,6 +478,9 @@ def _derive_spectral_threshold_screen(
                 if not thresholds_ready or not active_phase:
                     status = "not_evaluable"
                     reason = "baseline_threshold_not_estimable" if not thresholds_ready else "no_candidate_active_spectral_windows"
+                elif proxy == phases[0][1]:
+                    status = "baseline_reference"
+                    reason = "baseline_reference_not_scored_as_fatigue_outcome"
                 elif sustained_phase:
                     status = "fatigue_compatible_change_exploratory"
                     reason = "persistent_joint_mdf_mnf_threshold_crossing"
@@ -560,23 +576,26 @@ def _derive_spectral_threshold_screen(
     _write_csv(phases_path, phase_fields, phase_rows)
     receipt = {
         "analysis": "exploratory_spectral_change_threshold_screen",
+        "screen_version": 2,
+        "screen_version_name": "baseline_reference_excluded_from_persistence_screen",
         "processed_input_sha256": processed_input_sha256,
         "processed_input_note": "SHA-256 of the normalized ZIP consumed by this processor; when the user supplied a RAR, this is not the original RAR checksum.",
         "fatigue_ground_truth_available": False,
         "validated_fatigue_classifier_used": False,
         "clinical_fatigue_labels_emitted": False,
         "screen_status_categories": [
+            "baseline_reference",
             "fatigue_compatible_change_exploratory",
             "no_sustained_threshold_crossing",
             "not_evaluable",
         ],
-        "screen_status_interpretation": "Signal-change screen only. No-crossing does not establish absence of fatigue; exploratory crossing is not confirmed fatigue.",
+        "screen_status_interpretation": "The first third is a reference only and is not scored as optimal, fatigue-free, or fatigued. Later phases report exploratory spectral change, no sustained crossing, or not evaluable. No-crossing does not establish absence of fatigue; exploratory crossing is not confirmed fatigue.",
         "baseline_definition": "First elapsed-time third; candidate-active windows with finite MDF and MNF; at least five non-overlapping windows per recording and filter branch.",
         "lower_threshold_formula": "median(baseline) - 1.96 * 1.4826 * MAD(baseline)",
         "mad_zero_rule": "threshold not estimable",
         "activity_candidate_mask": "Union of Otsu RMS-envelope candidate intervals; a window requires at least 50% candidate-interval overlap. Candidate intervals are not verified contractions.",
         "source_windowing": "1.0 s windows with 50% overlap from the descriptive processor; every other contiguous window is retained for the threshold screen to avoid overlapping persistence observations.",
-        "persistence_rule": "MDF and MNF both strictly below their separate lower thresholds for at least three consecutive non-overlapping windows within one contiguous run.",
+        "persistence_rule": "In the middle and final thirds only, MDF and MNF must both be strictly below their separate lower thresholds for at least three consecutive non-overlapping windows within the same phase and contiguous run. The first third is used only as the baseline reference.",
         "filter_branches": sorted({str(row.get("filter_branch", "")) for row in window_rows}),
         "window_rows": len(window_rows),
         "phase_rows": len(phase_rows),
@@ -713,9 +732,18 @@ def _render_index(run_dir: Path, summary: dict[str, object], rows: list[dict[str
         (str(row["recording_id"]), str(row["time_position_proxy"]), str(row["filter_branch"])): row
         for row in screen_phase_rows
     }
+    screen_labels_by_record_phase: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for screen_row in screen_phase_rows:
+        key = (str(screen_row["recording_id"]), str(screen_row["time_position_proxy"]))
+        screen_labels_by_record_phase.setdefault(key, []).append(
+            (str(screen_row["filter_branch"]), str(screen_row["screen_label"]))
+        )
+    for labels in screen_labels_by_record_phase.values():
+        labels.sort(key=lambda item: item[0])
     phase_screen_counts = {
         status: sum(row.get("screen_status") == status for row in screen_phase_rows)
         for status in (
+            "baseline_reference",
             "fatigue_compatible_change_exploratory",
             "no_sustained_threshold_crossing",
             "not_evaluable",
@@ -816,12 +844,19 @@ def _render_index(run_dir: Path, summary: dict[str, object], rows: list[dict[str
     for item in record_rows:
         for label, proxy, _, _ in phases:
             phase_summary = item["phase_counts"][proxy]
+            phase_key = (str(item.get("recording_id", "")), proxy)
+            filter_labels = screen_labels_by_record_phase.get(phase_key, [])
+            screen_cell = "<br>".join(
+                f"<strong>{html.escape(branch)}</strong>: {html.escape(state)}"
+                for branch, state in filter_labels
+            ) or "No spectral screen available"
+            row_cells = "".join(f"<td>{html.escape(str(value))}</td>" for value in (
+                item.get("recording_id", ""), item.get("participant_pseudonym", "") or "Group unknown",
+                item.get("side", ""), item.get("series", ""), label, proxy,
+                phase_summary["count"], f'{phase_summary["duration_s"]:.3f}', "Not evaluated",
+            ))
             temporal_rows.append(
-                "<tr>" + "".join(f"<td>{html.escape(str(value))}</td>" for value in (
-                    item.get("recording_id", ""), item.get("participant_pseudonym", "") or "Group unknown",
-                    item.get("side", ""), item.get("series", ""), label, proxy,
-                    phase_summary["count"], f'{phase_summary["duration_s"]:.3f}', "Not evaluated",
-                )) + "</tr>"
+                f"<tr>{row_cells}<td>{screen_cell}</td></tr>"
             )
 
     feature_summary_rows = []
@@ -912,9 +947,9 @@ th,td{{border:1px solid #d5dde5;padding:6px 8px;text-align:left;font-variant-num
 <section class="section"><h2>All event times across all recordings</h2><figure>{timeline_svg}</figure><p class="note">Each row uses the recording's own time from its start. If candidate intervals overlap within a recording, the chart stacks them in separate lanes without merging or dropping events. Bars mark threshold-derived intervals only.</p></section>
 <section class="section"><h2>Candidate intervals by series and side</h2><figure>{count_svg}</figure><p class="note">Counts include all exported activity candidates; they are not repetition counts.</p></section>
 <section class="section"><h2>Recording inventory</h2><div class="table-wrap"><table><thead><tr><th>Recording</th><th>Group</th><th>Side</th><th>Series</th><th>Status</th><th>Activity candidates</th><th>Summed continuous time (s)</th></tr></thead><tbody>{''.join(manifest_rows)}</tbody></table></div></section>
-<section class="section"><h2>Temporal thirds (time-position proxy, not fatigue labels)</h2><p class="note">Start, middle and final refer only to thirds of each recording's elapsed-time span. Event candidates are assigned by their midpoint. These positions are not fatigue/no-fatigue classes.</p><div class="table-wrap"><table><thead><tr><th>Recording</th><th>Group</th><th>Side</th><th>Series</th><th>Temporal position</th><th>Stored proxy</th><th>Activity candidates</th><th>Candidate duration (s)</th><th>Fatigue label</th></tr></thead><tbody>{''.join(temporal_rows)}</tbody></table></div></section>
-<section class="section"><h2>Windowed feature summaries and exploratory spectral threshold screen</h2><p class="note">Start, middle and final are elapsed-time thirds. Median RMS is in ADC counts; MDF and MNF are in Hz. For each recording and filter branch, the lower reference threshold is median of candidate-active windows in the first third minus 1.96 × 1.4826 × MAD; at least five baseline windows are required and zero MAD is not estimable. A screen crossing requires both MDF and MNF below their thresholds for three consecutive non-overlapping one-second windows in the same continuous run. The activity mask is the Otsu envelope candidate interval set, with at least 50% of a window overlapping it. These are exploratory signal-change categories, not fatigue/no-fatigue labels.</p><p class="note">Full window-level values and decisions are in fatigue_threshold_windows.csv; phase summaries and thresholds are in fatigue_threshold_phases.csv; calculation settings and hashes are in fatigue_threshold_receipt.json. All detailed EMG outputs remain in this local results folder.</p><div class="table-wrap"><table><thead><tr><th>Recording</th><th>Group</th><th>Side</th><th>Series</th><th>Temporal position</th><th>Stored proxy</th><th>Filter branch</th><th>Feature windows</th><th>Median RMS (ADC)</th><th>Median MDF (Hz)</th><th>Median MNF (Hz)</th><th>Candidate-active independent windows</th><th>Baseline windows</th><th>Baseline status</th><th>MDF lower threshold (Hz)</th><th>MDF robust scale (Hz)</th><th>MNF lower threshold (Hz)</th><th>MNF robust scale (Hz)</th><th>Sustained crossing windows</th><th>Exploratory screen result</th><th>Screen reason</th></tr></thead><tbody>{''.join(feature_summary_rows)}</tbody></table></div></section>
-<section class="section fatigue-status-key" id="fatigue-status-key"><h2>Cómo interpretar las etiquetas relacionadas con fatiga</h2><p>Las filas de inicio, medio y final muestran un cribado espectral por combinación de grabación, rama de filtro y tercio temporal. Los conteos siguientes son combinaciones analizadas, no personas ni diagnósticos.</p><p><strong>Conteo de esta ejecución:</strong> {phase_screen_counts['fatigue_compatible_change_exploratory']} cambio(s) espectral(es) compatible(s), exploratorio(s); {phase_screen_counts['no_sustained_threshold_crossing']} sin cruce sostenido; {phase_screen_counts['not_evaluable']} no evaluable(s), de {len(screen_phase_rows)} combinaciones grabación × filtro × tercio.</p><ul><li><strong>Fatigue-compatible spectral change (exploratory; not confirmed) — Cambio espectral compatible con fatiga (exploratorio; no confirmado):</strong> MDF y MNF quedan por debajo de sus respectivos umbrales durante al menos tres ventanas consecutivas no solapadas de 1 s dentro del mismo tramo continuo. Señala un patrón espectral candidato; no confirma fatiga fisiológica.</li><li><strong>No sustained spectral threshold crossing (not proof of no fatigue) — Sin cruce sostenido del umbral (no demuestra ausencia de fatiga):</strong> no se cumple la persistencia conjunta exigida. Esto no equivale a “sin fatiga”.</li><li><strong>Not evaluable — No evaluable: faltan ventanas activas o una línea basal estimable.</strong> Puede deberse a menos de cinco ventanas basales, MAD no estimable, métricas espectrales ausentes o insuficientes ventanas con al menos 50 % de ocupación de actividad candidata.</li><li><strong>Not evaluated — No evaluado:</strong> etiqueta mostrada para cada evento candidato de actividad; no se asignó fatiga ni ausencia de fatiga al evento.</li></ul><p class="note">Los umbrales se estiman por grabación y rama de filtro a partir de la mediana basal − 1.96 × 1.4826 × MAD de MDF y MNF en el primer tercio. La actividad procede de intervalos candidatos de envolvente RMS por Otsu. No hay etiquetas independientes de fatiga ni un clasificador fisiológico validado en esta ejecución.</p></section>
+<section class="section"><h2>Temporal thirds (time-position proxy, not fatigue labels)</h2><p class="note">Start, middle and final are elapsed-time thirds. “Validated fatigue label” remains unavailable; the separate exploratory screen is shown for each filter branch because its values can differ by filter. Candidate events remain unclassified for fatigue and are not mechanically verified repetitions.</p><div class="table-wrap"><table><thead><tr><th>Recording</th><th>Group</th><th>Side</th><th>Series</th><th>Temporal position</th><th>Stored proxy</th><th>Activity candidates</th><th>Candidate duration (s)</th><th>Validated fatigue label</th><th>Exploratory screen state by filter branch</th></tr></thead><tbody>{''.join(temporal_rows)}</tbody></table></div></section>
+<section class="section"><h2>Windowed feature summaries and exploratory spectral threshold screen</h2><p class="note">Start, middle and final are elapsed-time thirds. Median RMS is in ADC counts; MDF and MNF are in Hz. For each recording and filter branch, the lower reference threshold is median of candidate-active windows in the first third minus 1.96 × 1.4826 × MAD; at least five baseline windows are required and zero MAD is not estimable. The first third is the baseline reference and is not tested as an outcome. In the middle and final thirds, a screen crossing requires both MDF and MNF below their thresholds for three consecutive non-overlapping one-second windows within the same phase and continuous run. The activity mask is the Otsu envelope candidate interval set, with at least 50% of a window overlapping it. These are exploratory signal-change categories, not fatigue/no-fatigue labels.</p><p class="note">Full window-level values and decisions are in fatigue_threshold_windows.csv; phase summaries and thresholds are in fatigue_threshold_phases.csv; calculation settings and hashes are in fatigue_threshold_receipt.json. All detailed EMG outputs remain in this local results folder.</p><div class="table-wrap"><table><thead><tr><th>Recording</th><th>Group</th><th>Side</th><th>Series</th><th>Temporal position</th><th>Stored proxy</th><th>Filter branch</th><th>Feature windows</th><th>Median RMS (ADC)</th><th>Median MDF (Hz)</th><th>Median MNF (Hz)</th><th>Candidate-active independent windows</th><th>Baseline windows</th><th>Baseline status</th><th>MDF lower threshold (Hz)</th><th>MDF robust scale (Hz)</th><th>MNF lower threshold (Hz)</th><th>MNF robust scale (Hz)</th><th>Sustained crossing windows</th><th>Exploratory screen result</th><th>Screen reason</th></tr></thead><tbody>{''.join(feature_summary_rows)}</tbody></table></div></section>
+<section class="section fatigue-status-key" id="fatigue-status-key"><h2>Estados de inicio, evolución y cambio compatible con fatiga</h2><p>El inicio sirve solo como referencia basal; no se verifica como estado óptimo ni como ausencia de fatiga. En el medio y final se evalúa si aparece un cambio espectral sostenido. Los conteos son combinaciones de grabación, filtro y tercio, no personas.</p><p><strong>Conteo de esta ejecución:</strong> {phase_screen_counts['baseline_reference']} referencia(s) basal(es); {phase_screen_counts['fatigue_compatible_change_exploratory']} cambio(s) espectral(es) compatible(s), exploratorio(s); {phase_screen_counts['no_sustained_threshold_crossing']} sin cruce sostenido; {phase_screen_counts['not_evaluable']} no evaluable(s), de {len(screen_phase_rows)} combinaciones grabación × filtro × tercio.</p><ul><li><strong>Baseline reference — Referencia basal (no se confirmó estado óptimo ni ausencia de fatiga):</strong> primer tercio usado para estimar los umbrales MDF/MNF; no es una etiqueta fisiológica.</li><li><strong>Fatigue-compatible spectral change (exploratory; not confirmed) — Cambio espectral compatible con fatiga (exploratorio; no confirmado):</strong> en el medio o final, MDF y MNF están debajo de sus umbrales durante al menos tres ventanas consecutivas no solapadas de 1 s dentro de la misma fase y tramo continuo. Es un patrón candidato, no confirma fatiga fisiológica.</li><li><strong>No sustained spectral threshold crossing (not proof of no fatigue) — Sin cruce sostenido del umbral (no demuestra ausencia de fatiga):</strong> no se cumple la persistencia conjunta en una fase evaluable; esto no equivale a “sin fatiga”.</li><li><strong>Not evaluable — No evaluable:</strong> faltan ventanas activas suficientes o una línea basal estimable, métricas espectrales válidas, o una ventana no alcanza al menos 50 % de ocupación de actividad candidata.</li><li><strong>Not evaluated — No evaluado:</strong> cada episodio candidato sigue sin etiqueta de fatiga. Los picos no son repeticiones mecánicas verificadas, por lo que no se asigna fatiga repetición por repetición.</li></ul><p class="note">El umbral inferior por grabación y filtro es mediana basal − 1.96 × 1.4826 × MAD, calculado en el primer tercio con al menos cinco ventanas activas válidas. La actividad procede de intervalos candidatos de envolvente RMS por Otsu. El inicio no se puntúa con la misma referencia que lo define. Esta ejecución no dispone de ground truth independiente ni de un clasificador validado de fatiga.</p></section>
 <section class="section"><h2>Complete candidate event table</h2><label for="event-search">Filter rows by recording, group, side, series, time, temporal position, fatigue status, or quality</label><br><input id="event-search" type="search" placeholder="Search this table"><div class="table-wrap"><table id="event-table"><thead><tr><th>Recording</th><th>Group</th><th>Side</th><th>Series</th><th>Candidate</th><th>Start-end (s)</th><th>Duration (s)</th><th>Envelope threshold (ADC)</th><th>Mean RMS (ADC)</th><th>Peak RMS (ADC)</th><th>Quality status</th><th>Temporal position</th><th>Fatigue status</th></tr></thead><tbody>{''.join(event_table_rows)}</tbody></table></div></section>
 <p class="note">The stored Voltage_mV column is not validated as a physical calibration. ADC amplitude is reported in counts. Keep this report and source-derived results in restricted storage.</p>
 <script>document.getElementById('event-search').addEventListener('input',function(){{const q=this.value.toLowerCase();for(const row of document.querySelectorAll('#event-table tbody tr'))row.hidden=!row.textContent.toLowerCase().includes(q)}});</script>
