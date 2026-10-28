@@ -101,7 +101,7 @@ Para la señal centrada de cada ventana, RMS = sqrt((1/N) sum x_c[n]^2). Se esti
 - `bibliografia/`: las 44 referencias consolidadas en dos archivos BibTeX, sin cambios.
 - `datasets/README.md`: organización local segura; no incluye datos.
 - reports/: informe IEEE público F31, agregados F55, estado F54, resumen y heatmap por pierna/serie, nota metodológica y auditoría.
-- `presentation/`: guion de 10 minutos sincronizado con la presentación Canva, PDF F57 y generador reproducible del PDF. El generador usa la dependencia opcional en `presentation/requirements-pdf.txt`; no forma parte del entorno de análisis EMG.
+- `presentation/`: guion hablado de 10 minutos en español, guion en inglés sincronizado con la presentación Canva, PDF F57 y generador reproducible del PDF. El generador usa la dependencia opcional en `presentation/requirements-pdf.txt`; no forma parte del entorno de análisis EMG.
 - `manifest/SHA256SUMS`: hashes del paquete.
 
 El manifiesto contiene los SHA-256 de los bytes versionados de cada archivo rastreado, excepto el propio manifiesto. Así los hashes permanecen estables aunque un checkout de Windows convierta finales de línea LF/CRLF.
