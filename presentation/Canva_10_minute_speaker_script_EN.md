@@ -1,103 +1,97 @@
-# Group 4 — 10-Minute Scientific Presentation Script
+# Group 4 - 10-Minute Scientific Presentation Script
 
 **Language:** English
-**Target duration:** planned at 10:00; 1,238 spoken words (approximately 124 words per minute). Assigned slide timings sum to 10:00; rehearse to confirm delivery pace.
-**Deck:** existing Canva presentation “Defensa sEMG cuádriceps” (10 slides; existing layout retained).
+**Target duration:** exactly 10:00 of assigned slide time; rehearse with a timer to match the speaking pace.
+**Deck:** existing Canva presentation, "Defensa sEMG cuádriceps" (10 slides).
+**Revision:** F57, 2026-10-28.
+**Spoken-word target:** approximately 1,200 words; cues and the demonstration note are not spoken.
 
-Slide timings sum to 10:00. Each spoken section is word-for-word; visual cues are not spoken.
+**Demonstration note (not spoken):** The F57 one-click launcher is a descriptive ZIP processor. It loads no predictive model, does not verify mechanical repetitions, and does not predict physiological fatigue. The independent two-patient ZIP was not supplied with this run; therefore, this script reports no results for those patients. Use only an authorized input and a restricted local output folder.
 
-## Slide 1 — Quadriceps sEMG during unilateral knee extension
+Assigned slide timings sum to 10:00. The final timing depends on rehearsal pace; do not omit scientific limitations to meet the clock.
 
-**Speaking time:** 00:30
-**Visual reference:** Title and study question
+## Slide 1 - Quadriceps sEMG during unilateral knee extension (00:30)
 
-**Complete speaking script:**
+**Visual cue:** Title, group, and study question.
 
-Good morning. We are Group 4, presenting an analysis of surface electromyography recordings associated with unilateral knee extension. Our focus is how the stored EMG channel behaves across formal sets and between sides. We distinguish the course guide’s intended protocol from what the files actually document. The central question is what these recordings support about muscle activity—and what they do not establish about fatigue.
+**Script:**
 
-## Slide 2 — Study aim and intended protocol
+Good morning. We are Group 4. We analyzed surface electromyography files associated with unilateral knee extension. Our focus is the signal processing and the changes in the stored channel across formal series and sides. We separate the protocol described in the course guide from the acquisition details that the CSV files cannot verify. The results are descriptive, not a validated fatigue diagnosis.
 
-**Speaking time:** 00:40
-**Visual reference:** Guide target and protocol statement
+## Slide 2 - Study aim and intended protocol (00:40)
 
-**Complete speaking script:**
+**Visual cue:** The guide's intended exercise and target muscle.
 
-The course guide frames the exercise as unilateral knee extension, with the rectus femoris as the intended target and a planned load of seventy percent of one-repetition maximum. This keeps the central question tied to the observed signal rather than assumed protocol details. Our aim here is narrower: describe signal-derived activity trends in the available files. The export does not verify electrode placement or the actual load used. That distinction matters because muscle identity, force, and workload affect how EMG amplitude and frequency should be interpreted.
+**Script:**
 
-## Slide 3 — What the recordings contain
+The course guide specifies unilateral knee extension, with the rectus femoris as the intended target and a planned load of seventy percent of one-repetition maximum. Those are protocol intentions, not measurements confirmed in each file. Our aim was to characterize the available signal and test whether its trends were compatible with established EMG analysis. The CSV export does not verify electrode placement, actual load, cadence, rest periods, or force. Those omissions limit physiological interpretation, even when signal calculations are reproducible.
 
-**Speaking time:** 00:50
-**Visual reference:** 15 IDs, 140 files, sample count, missing combinations
+## Slide 3 - What the recordings contain (00:50)
 
-**Complete speaking script:**
+**Visual cue:** Participant-derived groups, formal/QC files, sample count, and missing combinations.
 
-The inventory contains recordings from fifteen anonymized participant IDs. There are one hundred forty CSV files: one hundred thirty-eight formal records labeled R1 through R5, plus two preliminary or noisy records, R0 and R0_1, retained for quality control. Together the files contain 4,256,257 sample points. Twelve expected participant, limb, and series combinations are absent. This limits complete within-subject coverage. Filenames encode side and record identifiers, but the export does not include synchronized force, video, or mechanical repetition markers. Therefore, detected activation events are not automatically counted as repetitions.
+**Script:**
 
-## Slide 4 — From CSV to EMG features
+The inventory contains fifteen recording-derived participant groups and one hundred forty CSV files. One hundred thirty-eight are formal series R1 through R5; two files, R0 and R0_1, are preliminary or quality-control records. The files contain 4,256,257 sample points, with twelve expected participant, side, and series combinations absent. The CSV columns are Relative_Time_s, ADC_Value, and Voltage_mV. Negative ADC values occur. The last column is an arithmetic transformation, not a verified physical voltage calibration. No synchronized force, video, or mechanical repetition markers are included, so activity peaks cannot be called verified repetitions.
 
-**Speaking time:** 00:55
-**Visual reference:** Original-to-filtered processing diagram and filter labels
+## Slide 4 - From CSV to EMG features (00:55)
 
-**Complete speaking script:**
+**Visual cue:** The comparison of the stored signal and filter branches.
 
-The CSV fields are Relative_Time_s, ADC_Value, and Voltage_mV. Negative ADC values are present, and the export does not establish the device’s ADC resolution, analog chain, physical voltage calibration, or whether the stored channel is raw, rectified, or an envelope. The analysis preserved the original samples and treated discontinuities as separate segments. It compared high-pass cutoffs of twenty and forty hertz, a Butterworth band-pass from twenty to four hundred hertz, and a Hamming-window FIR band-pass. A notch was not applied because the line-interference screen did not meet the preset criterion. Filter comparison therefore concerns signal conditioning, not proof that one filter best represents muscle physiology.
+**Script:**
 
-## Slide 5 — RMS, MDF, MNF, and the spectrum
+We preserved the original samples and treated timestamp gaps greater than one point five milliseconds as separate runs, without interpolation across them. The comparison included fourth-order Butterworth high-pass filters at twenty and forty hertz, a fourth-order twenty-to-four-hundred-hertz band-pass, and a one-hundred-one-tap Hamming-window FIR band-pass over the same band. Forward-backward filtering gives zero phase in valid runs, with edge effects still requiring care. A notch filter was not applied because the prespecified line-interference screen did not meet its ten-decibel criterion. With no clean reference channel, we cannot claim one filter recovered the true muscle signal better than the others.
 
-**Speaking time:** 00:50
-**Visual reference:** Equations and conceptual signal/spectrum schematic
+## Slide 5 - RMS, MDF, MNF, and the spectrum (00:50)
 
-**Complete speaking script:**
+**Visual cue:** Feature equations and the labeled conceptual signal/spectrum diagram.
 
-RMS is the square root of the mean squared signal and summarizes amplitude; it is not a direct measure of force. The median frequency, or MDF, divides the power spectrum into equal lower- and upper-frequency power. Mean frequency, or MNF, is the power-weighted average frequency: the sum of frequency times power divided by total power. The Fourier transform describes frequency content, while the power spectral density estimates how signal power is distributed across frequency. During sustained, controlled contractions, MDF and MNF may decline as the spectrum shifts lower. RMS can rise, remain stable, or fall. FFT and PSD estimates are meaningful only when the segment is long enough and contains continuous muscle activity.
+**Script:**
 
-## Slide 6 — Activity masking and spectral validity
+For centered samples x, RMS is the square root of the mean of x squared; here it is expressed in ADC counts and is an amplitude proxy, not force. A Hann-windowed Fourier transform yields a one-sided power spectrum, with PSD expressed in squared ADC counts per hertz. MDF is the frequency where cumulative power reaches half the total power in the analyzed band. MNF is the power-weighted mean frequency: the sum of frequency times power divided by total power. In sustained contractions at approximately controlled force, MDF or MNF may decrease. RMS may increase, remain stable, or decrease. These patterns are context-dependent and are not universal fatigue thresholds.
 
-**Speaking time:** 01:00
-**Visual reference:** Activity/rest mask and spectral analysis intervals
+## Slide 6 - Activity and spectral validity (01:00)
 
-**Complete speaking script:**
+**Visual cue:** The activity/rest distinction and the continuous-segment rule.
 
-Rest and low-activity windows can produce unstable or extreme spectral estimates, so the analysis separated activity detection from spectral measurement. The activity envelope identifies candidate active intervals; weak contractions were retained when their signal quality and continuous duration supported measurement. Window overlap is not the same parameter as active occupancy: one controls how often analysis windows advance, while the other describes how much of a window contains activity. MDF and MNF were calculated only on continuous, active, valid segments, never by joining across rest or gaps. Longer segments improve spectral stability but reduce the amount of usable data. We compared candidate durations instead of relying on zero-padding to imply more physical resolution. This changes coverage, so masked and unmasked results must be interpreted together.
+**Script:**
 
-## Slide 7 — Within-limb progression from R1 to R5
+The cohort's F39 analysis separated activity masking from spectral estimation. It retained weak contractions when signal quality and continuous duration were adequate, excluded rest from spectral metrics, and never joined activity across gaps. The occupancy threshold describes the active fraction within a window; it is different from the fifty-percent temporal overlap between successive windows. We compared continuous frames of zero point two five, zero point five, and one second at several occupancy settings. At fifty-percent occupancy, median spectral coverage declined from 27.6 to 19.1 to 2.7 percent as frame duration increased. Weak and late event retention also fell, and the one-second estimates were too sparse to estimate within-window dispersion. The F57 ZIP launcher is separate: it uses an exploratory Otsu threshold on fifty-millisecond RMS windows to list activity candidates. Otsu is not a fatigue detector, and the launcher does not load the F39 mask or a trained model.
 
-**Speaking time:** 01:00
-**Visual reference:** RMS, MDF, MNF changes and 95% confidence intervals
+## Slide 7 - Within-limb progression from R1 to R5 (01:00)
 
-**Complete speaking script:**
+**Visual cue:** Cluster-bootstrap estimates and metric-specific denominators.
 
-The R1-to-R5 comparison includes twenty-seven matched participant–limb records. Mean RMS changed by plus 8.57 percent, with a 95-percent confidence interval from minus 0.68 to plus 18.26 percent. MDF changed by minus 0.54 hertz, with an interval from minus 3.88 to plus 2.66 hertz. MNF changed by minus 3.31 hertz, with an interval from minus 6.88 to minus 0.28 hertz; this estimate was sensitive to the spectral estimator. These directions are not fully consistent across indicators, and the first two intervals include no change. Different activity durations, pauses, effort, and signal quality can also explain variation. We therefore describe possible channel trends, not confirmed fatigue. These are aggregate paired changes, not evidence that each participant followed the same trajectory.
+**Script:**
 
-## Slide 8 — Bilateral comparison
+Twenty-seven same-participant, same-limb R1-to-R5 pairs were available. Metrics had different evaluable denominators: active RMS in twenty-six pairs across fifteen participants, and active MDF and MNF in twenty pairs across twelve participants. Participant-cluster estimates, with four thousand bootstrap resamples, were plus 8.571 percent for RMS, with a ninety-five-percent interval from minus 0.681 to plus 18.264; minus 0.535 hertz for MDF, interval minus 3.877 to plus 2.663; and minus 3.306 hertz for MNF, interval minus 6.878 to minus 0.277. Only the primary MNF interval excludes zero. Its direction is sensitive to the spectral estimator and duration settings. The series were not matched for force, intensity, rest, or duration, so these are channel trends, not confirmed fatigue.
 
-**Speaking time:** 01:00
-**Visual reference:** Paired left–right records and confidence intervals
+## Slide 8 - Bilateral comparison (01:00)
 
-**Complete speaking script:**
+**Visual cue:** Metric-specific left-right pairs and uncertainty.
 
-For the bilateral analysis, only records with both sides available were paired. The inventory provides sixty-three paired left–right records per series. The confidence intervals for RMS, MDF, and MNF include zero, so these data do not demonstrate a consistent side difference. That does not prove the limbs are physiologically equivalent, and it does not identify a side with greater functional fatigue. Filename-based laterality helps organize the files, but electrode placement, movement phase, force, and mechanics were not independently synchronized. The appropriate conclusion is limited: no robust bilateral difference was detected in the available channel-level indicators under this analysis. Paired analysis reduces imbalance but cannot correct unmeasured differences in execution or electrode placement.
+**Script:**
 
-## Slide 9 — Machine-learning benchmark
+There were sixty-three same-participant left-right pairs available per formal series. The primary active RMS contrast was minus 0.342 percent, with a ninety-five-percent interval from minus 9.865 to plus 8.837, evaluable in sixty pairs across fourteen participants. MDF was plus 0.994 hertz, interval minus 3.969 to plus 5.618, and MNF was plus 1.104 hertz, interval minus 3.751 to plus 5.675; each spectral metric was evaluable in forty-nine pairs across twelve participants. All three intervals include zero. This means the analysis did not detect a consistent difference; it does not prove physiological equivalence between legs. Laterality is read from filenames, and biomechanics or electrode position were not independently measured.
 
-**Speaking time:** 01:00
-**Visual reference:** Grouped LOSO Macro-F1 and target definition
+## Slide 9 - Temporal proxy benchmark (01:00)
 
-**Complete speaking script:**
+**Visual cue:** Grouped LOSO score and target definition.
 
-The local machine-learning benchmark predicts recording position: whether a window belongs to the first, middle, or final third of a recording. It does not predict a fatigue label. Grouped leave-one-subject-out validation evaluates performance on participants excluded from training, and the reported temporal Macro-F1 is 0.716 with a fold-level spread of 0.146. A high score here means the model can distinguish temporal thirds under this labeling scheme. It does not show that it detects physiological fatigue. The separate Borg and Cerqueira tasks concern perceived effort or fatigue in upper-limb protocols, so their models cannot be transferred as validated quadriceps-fatigue detectors. Compatible external physiological validation has not been demonstrated. The reported score should not be read as detection accuracy for a clinical event or its onset.
+**Script:**
 
-## Slide 10 — Interpretation, limitations, and conclusions
+The previously reported local machine-learning benchmark classifies a recording window as belonging to its first, middle, or final temporal third. It uses grouped leave-one-subject-out evaluation across fifteen participants and reports Macro-F1 of 0.716 plus or minus 0.146. This score measures temporal-position classification, not repetitions, fatigue, force loss, fatigue onset, or a fatigue level. The F57 one-click runner does not load this benchmark or any other classifier. Borg and Cerqueira models address separate perceived-exertion or self-report targets in upper-limb protocols; they are not validated quadriceps-fatigue models. External physiological validation for this local task has not been demonstrated.
 
-**Speaking time:** 02:15
-**Visual reference:** Conclusions and evidence needed
+## Slide 10 - Interpretation, limits, and local demonstration (02:15)
 
-**Complete speaking script:**
+**Visual cue:** The conclusions, next measurements, and the launcher in the project folder.
 
-Muscular fatigue can alter motor-unit behavior and the spectral distribution of surface EMG. Under sustained contractions with controlled force, a progressive decrease in MDF or MNF can be compatible with changes in muscle-fiber conduction velocity. But this expected pattern is conditional, not a universal diagnostic rule. Dynamic knee extension adds movement, changing joint angle, recruitment, pauses, and electrode motion. Those factors can shift amplitude and frequency even without a verified loss of force. RMS is especially dependent on recruitment and effort, so an increase is not required for fatigue, and a decrease does not rule it out.
+**Script:**
 
-Our recordings show a modest average increase in RMS and downward average changes in MDF and MNF from R1 to R5, but only the MNF confidence interval excludes zero, and that estimate is estimator-sensitive. The bilateral intervals include zero. The signals therefore support exploratory channel-level trends; they do not establish a fatigue onset, a fatigue level, or a loss of quadriceps force. The temporal classifier answers a different question and must remain labeled as a time-position benchmark.
+Muscle fatigue can change motor-unit behavior and the frequency distribution of surface EMG. During a sustained contraction with controlled force, a progressive decrease in MDF or MNF may be compatible with changes in muscle-fiber conduction velocity. But dynamic knee extension changes joint angle, recruitment, effort, and electrode motion; pauses and changing activity can also alter these indicators. RMS is not expected to move in one direction under every protocol. A spectral trend alone does not establish loss of force or a physiological fatigue level.
 
-There are also limits in the source data: electrode site, physical voltage calibration, the hardware sampling chain, actual load, rest periods, cadence, and synchronized repetitions are not confirmed by the CSV export. The guide’s rectus-femoris and seventy-percent one-repetition-maximum protocol is an intended design, not proof that each recording followed it.
+The recordings show a modest mean rise in active RMS and downward mean changes in MDF and MNF from R1 to R5. Only the primary MNF confidence interval excludes zero, and that estimate is sensitive to analysis choices. The bilateral intervals include zero. The sampling chain, physical voltage calibration, electrode placement, actual load, rest and cadence, and mechanically synchronized repetitions remain unverified. The correct conclusion is that the project describes trends in the stored EMG-derived channel for a task intended to study quadriceps extension. It does not confirm rectus-femoris fatigue or a fatigue onset.
 
-A stronger follow-up should verify electrode placement, calibrate the acquisition chain, record MVC or force, and synchronize every repetition with movement and rest. It should collect an independent fatigue reference and evaluate thresholds on participants held out from model selection. Until then, we conclude that the project characterizes EMG channel behavior during the intended unilateral knee-extension task, while physiological fatigue detection remains unvalidated. Thank you.
+For the local demonstration, double-click `INICIAR_INFERENCIA.bat`. If this is the first run, it prepares the Python environment and runs its checks. Select an authorized ZIP containing compatible CSV files, then select a restricted local output folder. The tool creates a recording manifest, activity-event candidates, a results index, and per-recording dashboards; the browser opens the index when processing completes. The outputs are descriptive features and activity candidates. The launcher loads no model, verifies no repetition count, and emits no fatigue prediction.
+
+The independent two-patient ZIP was not supplied with this run, so we cannot show patient-specific results or claim external validation. When an authorized compatible ZIP is available, the same descriptive workflow can be demonstrated without using it to tune the method. A defensible repetition model requires synchronized repetition annotations. A fatigue model requires an independent fatigue target and participant-held-out evaluation. The next study should verify electrode site and acquisition calibration, record force or MVC, synchronize movement and repetitions, and collect an independent fatigue reference. Thank you.

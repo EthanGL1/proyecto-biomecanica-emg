@@ -101,7 +101,7 @@ Para la señal centrada de cada ventana, RMS = sqrt((1/N) sum x_c[n]^2). Se esti
 - `bibliografia/`: las 44 referencias consolidadas en dos archivos BibTeX, sin cambios.
 - `datasets/README.md`: organización local segura; no incluye datos.
 - reports/: informe IEEE público F31, agregados F55, estado F54, resumen y heatmap por pierna/serie, nota metodológica y auditoría.
-- presentation/: guion hablado aprobado para la presentación Canva de 10 minutos.
+- `presentation/`: guion de 10 minutos sincronizado con la presentación Canva, PDF F57 y generador reproducible del PDF. El generador usa la dependencia opcional en `presentation/requirements-pdf.txt`; no forma parte del entorno de análisis EMG.
 - `manifest/SHA256SUMS`: hashes del paquete.
 
 El manifiesto contiene los SHA-256 de los bytes versionados de cada archivo rastreado, excepto el propio manifiesto. Así los hashes permanecen estables aunque un checkout de Windows convierta finales de línea LF/CRLF.
@@ -232,6 +232,14 @@ La forma LOSO existente conserva `--fold-manifest`; ambos argumentos de manifies
 El repositorio también contiene una pantalla exploratoria de cruces sostenidos de RMS/MDF (`src/analizar_umbral_senal_emg.py`), pero su ejecución completa lee un manifiesto, el recibo de sensibilidad y señales/arrays privados. Sus salidas pueden incluir identificadores, tiempos por registro y figuras individuales; mantenlas en almacenamiento restringido. La pantalla no cuenta repeticiones ni demuestra fatiga o fallo técnico. La tabla de componentes, alcance reproducible y prerrequisitos está en `reports/PUBLIC_RELEASE_AUDIT.md`.
 
 No hay entradas ni evaluación de Borg/RPE en el paquete. Tampoco se publica un checkpoint ni un comando de inferencia listo para uso: el código existente entrena y evalúa el proxy de posición temporal con etiquetas, particiones y trazas privadas. No uses esas clases como etiquetas fisiológicas. Reproducir el benchmark F31 exige los archivos locales autorizados y sus recibos coincidentes; el demo sintético no reproduce sus métricas.
+
+## Ejecutar el análisis descriptivo de un ZIP en Windows
+
+En la rama F57 se añadió un lanzador que procesa en lote los CSV compatibles del ZIP con el procesador descriptivo existente. En el primer uso, haga doble clic en `INSTALAR_TODO.bat`; después, haga doble clic en `INICIAR_INFERENCIA.bat`, seleccione el ZIP y elija una carpeta privada de salida. El selector abre por defecto `%LOCALAPPDATA%\EMG_Biomecanica\Resultados` en Windows; si se elige otra carpeta, use una ubicación con acceso restringido y evite rutas sincronizadas/compartidas. El programa solo puede rechazar salidas dentro del checkout: no verifica permisos, sincronización, copias de seguridad o retención del destino. También puede abrir esta carpeta en Visual Studio Code: el intérprete queda configurado en `.venv` después de instalar.
+
+La salida incluye un manifiesto por grabación, eventos candidatos de actividad y un índice HTML con enlaces a los tableros. Las etiquetas laterales/series se leen de la ruta del archivo y seudonimizan cuando la estructura permite agrupar carpetas; los nombres originales no se copian a las salidas. Los registros R0/R0_1 se conservan como controles preliminares y no se procesan como series formales. La ruta de resultados contiene señales y debe guardarse en almacenamiento autorizado.
+
+Este lanzador **no carga un modelo**: no confirma repeticiones mecánicas y no predice ni valida fatiga fisiológica. El ZIP independiente de dos pacientes no forma parte de las entradas disponibles para esta revisión; no se presentan resultados por paciente ni se llama a esta ejecución validación externa. El guion F57 explica el procedimiento de un clic como análisis descriptivo y presenta únicamente resultados agregados verificados. Consulte `reports/F57_ONECLICK_STATUS.md` para las pruebas efectivamente realizadas y el alcance comprobado.
 
 ## Límites y uso
 
