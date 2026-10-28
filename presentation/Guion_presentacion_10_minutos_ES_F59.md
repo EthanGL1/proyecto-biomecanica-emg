@@ -6,7 +6,7 @@
 
 **Presentación:** diseño Canva existente, “Defensa sEMG cuádriceps”, 10 diapositivas.
 
-**Demostración:** el lanzador F57 procesa descriptivamente un CSV individual R1–R5 sin comprimir; rechaza ZIP y no extrae archivos comprimidos. No carga un modelo predictivo, no verifica repeticiones mecánicas ni estima fatiga fisiológica. No hay CSV individuales autorizados de los dos pacientes para mostrar resultados por paciente.
+**Demostración:** el lanzador F59 procesa descriptivamente un CSV formal R1–R5 o un ZIP con CSV compatibles. Valida los miembros del archivo y mantiene las salidas en una carpeta privada. No carga un modelo predictivo, no verifica repeticiones mecánicas ni estima fatiga fisiológica. No hay CSV individuales autorizados de los dos pacientes para mostrar resultados por paciente.
 
 ## Diapositiva 1 — EMG de cuádriceps durante extensión unilateral (00:30)
 
@@ -46,7 +46,7 @@ Conservamos los archivos originales y separamos los tramos cuando la diferencia 
 
 **Guion hablado:**
 
-Para una ventana centrada, el RMS es la raíz cuadrada del promedio de las muestras al cuadrado. Aquí se reporta en cuentas ADC como indicador de amplitud, no en fuerza ni en milivoltios calibrados. Aplicamos la transformada discreta de Fourier con ventana Hann y calculamos la densidad espectral de potencia en cuentas ADC al cuadrado por hertz. La MDF es la frecuencia que divide en dos la potencia acumulada de la banda analizada. La MNF es el promedio de frecuencia ponderado por potencia. En una contracción sostenida y controlada, MDF o MNF pueden descender; RMS puede subir, mantenerse o bajar según reclutamiento, esfuerzo y movimiento. Ninguna dirección aislada es un umbral universal de fatiga.
+Para una ventana centrada, el RMS es la raíz cuadrada del promedio de las muestras al cuadrado. Aquí se reporta en cuentas ADC como indicador de amplitud, no en fuerza ni en milivoltios calibrados. La transformada discreta de Fourier suma cada muestra ponderada por una ventana y por una exponencial compleja. La densidad espectral de Welch promedia periodogramas de segmentos; se expresa en cuentas ADC al cuadrado por hertz. La MDF es la frecuencia que divide en dos la potencia integrada, y la MNF es el promedio de frecuencia ponderado por PSD. En una contracción sostenida y controlada, MDF o MNF pueden descender; RMS puede subir, mantenerse o bajar según reclutamiento, esfuerzo y movimiento. Ninguna dirección aislada es un umbral universal de fatiga.
 
 ## Diapositiva 6 — Actividad y validez de las métricas espectrales (00:55)
 
@@ -78,7 +78,7 @@ Había hasta sesenta y tres pares izquierda-derecha por serie formal. En las com
 
 **Guion hablado:**
 
-El benchmark local previamente ejecutado clasifica si una ventana pertenece al primer, segundo o último tercio temporal de la grabación. Usa validación leave-one-subject-out agrupada por participante y reportó Macro-F1 de cero coma siete uno seis, con desviación de cero coma uno cuatro seis. Es un resultado de clasificación temporal, no de repeticiones, pérdida de fuerza, comienzo de fatiga ni nivel fisiológico. El lanzador F57 no carga ese benchmark ni ningún otro clasificador. Los modelos Borg y Cerqueira corresponden a objetivos de esfuerzo percibido o auto-reporte en protocolos de miembro superior; no validan fatiga del cuádriceps. Para seleccionar un detector de repeticiones se requieren anotaciones mecánicas sincronizadas. Para validar fatiga se requiere una referencia independiente adecuada.
+El benchmark local previamente ejecutado clasifica si una ventana pertenece al primer, segundo o último tercio temporal de la grabación. Usa validación leave-one-subject-out agrupada por participante y reportó Macro-F1 de cero coma siete uno seis, con desviación de cero coma uno cuatro seis. Se compararon mayoría, centroide, k vecinos, ridge, regresión logística, LDA, SVM lineal, random forest, boosting por árboles cortos y modelos RMS/MDF con LDA o logística. El vector principal tuvo quince características: media ADC, desviación estándar poblacional, RMS, media absoluta, mediana, desviación absoluta mediana, percentiles 5/25/75/95, pico a pico, longitud de línea media, cruces de mediana, asimetría y curtosis excedente. Es un resultado de clasificación temporal, no de repeticiones, pérdida de fuerza, comienzo de fatiga ni nivel fisiológico. El lanzador F59 no carga ese benchmark ni ningún otro clasificador. Los modelos Borg y Cerqueira corresponden a objetivos de esfuerzo percibido o auto-reporte en protocolos de miembro superior; no validan fatiga del cuádriceps. Para seleccionar un detector de repeticiones se requieren anotaciones mecánicas sincronizadas. Para validar fatiga se requiere una referencia independiente adecuada.
 
 ## Diapositiva 10 — Conclusiones y demostración local (01:50)
 
@@ -90,6 +90,6 @@ La fatiga puede modificar la actividad de las unidades motoras y el espectro EMG
 
 En R1 a R5 observamos un aumento medio de RMS activo y descensos medios de MDF y MNF. Solo el intervalo principal de MNF excluyó cero, con sensibilidad a la duración espectral. Los intervalos bilaterales incluyeron cero. No verificamos la modalidad física de la señal, calibración de voltaje, sitio del electrodo, carga real, pausas, cadencia ni marcadores mecánicos. El estudio describe tendencias del canal guardado; no confirma fatiga del recto femoral ni su inicio.
 
-Para la demostración, hacemos doble clic en `INICIAR_INFERENCIA.bat`. En el primer uso instala el entorno y ejecuta las comprobaciones. Elegimos un CSV formal R1 a R5 sin comprimir y una carpeta privada de salida. El lanzador procesa una grabación por ejecución; si hay varias, seleccionamos cada CSV por separado. Los ZIP se rechazan, incluso si se renombran como CSV. El programa genera un manifiesto, eventos candidatos, un índice y un tablero. Esta ejecución de un clic es descriptiva: no carga un modelo, no confirma repeticiones ni predice fatiga.
+Para la demostración, hacemos doble clic en `INICIAR_INFERENCIA.bat`. En el primer uso instala el entorno y ejecuta las comprobaciones. Elegimos un CSV formal R1 a R5 o un ZIP con los CSV compatibles, y una carpeta privada de salida. El programa genera un manifiesto por grabación, eventos candidatos, un índice y tableros. Esta ejecución de un clic es descriptiva: no carga un modelo, no confirma repeticiones ni predice fatiga.
 
 No se suministraron CSV individuales autorizados de los dos pacientes; por eso no mostramos una inferencia ni resultados de esas personas. La prueba real registrada procesó una grabación de desarrollo y no es validación externa. Para validar repeticiones hacen falta marcas mecánicas sincronizadas; para validar fatiga, una referencia independiente y compatible. Muchas gracias.

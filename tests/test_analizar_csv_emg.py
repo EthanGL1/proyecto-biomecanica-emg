@@ -24,7 +24,7 @@ from analizar_csv_emg import (
 RAW_HEADER = b"Relative_Time_s,ADC_Value,Voltage_mV\n0.000,0,0.00\n"
 
 
-class ZipRejectionTests(unittest.TestCase):
+class ZipInputIntegrationTests(unittest.TestCase):
     def make_archive(self, members):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
@@ -34,14 +34,36 @@ class ZipRejectionTests(unittest.TestCase):
                 archive.writestr(name, content)
         return path
 
-    def test_cli_does_not_accept_zip_option(self):
-        archive = self.make_archive({"participant/iz_R1.csv": RAW_HEADER})
-        output = archive.parent / "out"
-        with patch("sys.stderr", new_callable=io.StringIO):
-            with self.assertRaises(SystemExit) as raised:
-                main(["--zip", str(archive), "--output-dir", str(output)])
-        self.assertEqual(raised.exception.code, 2)
-        self.assertFalse(output.exists())
+    def test_cli_processes_formal_csv_inside_zip_without_model_inference(self):
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            archive_path = root / "new-participant.zip"
+            rows = io.StringIO()
+            writer = csv.writer(rows)
+            writer.writerow(("Relative_Time_s", "ADC_Value", "Voltage_mV"))
+            for index in range(5000):
+                time_s = index / 1000
+                adc = round(2048 + 180 * math.sin(2 * math.pi * 80 * time_s))
+                writer.writerow((f"{time_s:.6f}", adc, f"{adc * 3300 / 4095:.3f}"))
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("private-participant/iz_R1.csv", rows.getvalue())
+
+            output = root / "private-results"
+            with redirect_stdout(io.StringIO()):
+                exit_code = main(["--zip", str(archive_path), "--output-dir", str(output), "--no-open"])
+            run_dir = next(output.glob("analisis_emg_*"))
+            summary = __import__("json").loads((run_dir / "run_summary.json").read_text(encoding="utf-8"))
+            manifest = (run_dir / "run_manifest.csv").read_text(encoding="utf-8")
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(summary["csv_count"], 1)
+            self.assertEqual(summary["processed_count"], 1)
+            self.assertEqual(summary["pipeline_version"], "public_F59")
+            self.assertFalse(summary["model_loaded"])
+            self.assertIsNone(summary["mechanical_repetition_prediction"])
+            self.assertIsNone(summary["physiological_fatigue_prediction"])
+            self.assertNotIn("private-participant", manifest)
+            self.assertTrue((run_dir / "recordings" / "REC0001" / "dashboard.html").is_file())
 
 
 class DefaultOutputDirectoryTests(unittest.TestCase):
@@ -114,6 +136,7 @@ class DiscoverSingleCsvTests(unittest.TestCase):
             manifest = (run_dir / "run_manifest.csv").read_text(encoding="utf-8")
             self.assertEqual(exit_code, 0)
             self.assertEqual(summary["processed_count"], 1)
+            self.assertEqual(summary["pipeline_version"], "public_F59")
             self.assertFalse(summary["model_loaded"])
             self.assertIsNone(summary["mechanical_repetition_prediction"])
             self.assertIsNone(summary["physiological_fatigue_prediction"])

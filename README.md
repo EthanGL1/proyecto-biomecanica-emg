@@ -1,4 +1,12 @@
-# Análisis EMG — paquete público reproducible F54 (actualización intermedia, 21 de octubre de 2026)
+# Análisis EMG — paquete público reproducible (actualización F59, 28 de octubre de 2026)
+
+## Actualización F59 — entrada CSV o ZIP y estado del lanzador
+
+El lanzador permite seleccionar **un CSV formal R1–R5** o **un ZIP con uno o más CSV de grabaciones**. El ZIP se inspecciona antes de procesarlo: se rechazan rutas absolutas o con `..`, enlaces simbólicos, nombres duplicados, miembros cifrados y archivos que excedan los límites publicados. Los miembros válidos se copian a nombres temporales generados por el programa; no se extrae usando las rutas escritas dentro del ZIP. `R0`/`R0_1`, nombres sin una serie inequívoca y esquemas distintos de `Relative_Time_s,ADC_Value[,Voltage_mV]` quedan fuera del procesamiento formal.
+
+La presentación Canva existente se actualizó con las ecuaciones de FFT/PSD/MDF/MNF, el detalle de las variables y figuras agregadas/experimentales ya aprobadas. Las señales individuales mostradas allí siguen siendo ejemplos descriptivos; el repositorio público no añade grabaciones ni resultados identificables.
+
+**El lanzador no usa el “mejor modelo” del benchmark temporal:** no incluye ni carga un artefacto de modelo para nuevos participantes. Produce análisis descriptivo, características y eventos candidatos de actividad. No estima repeticiones verificadas ni niveles o probabilidades de fatiga. Las métricas de tercios temporales no son métricas de fatiga.
 
 ## Actualizacion F56 - visor y estado de auditoria
 
@@ -27,7 +35,7 @@ Borg (esfuerzo percibido de hombro, RPE ≥17) obtuvo Macro-F1 0,5787 ± 0,1344,
 
 Se publican 36 filas agregadas por tarea, modelo y configuración y 36 matrices de confusión agregadas: [métricas por modelo](reports/F55_METRICS_AGGREGATED_PUBLIC.csv) y [matrices de confusión](reports/F55_CONFUSION_COUNTS_AGGREGATED_PUBLIC.csv). El CSV de 625 filas por pliegue y su manifiesto con rutas privadas no se publican. R1–R5, comparación bilateral y filtros conservan los resultados agregados ya publicados, sin recálculo en F54.
 
-La presentación Canva “Defensa sEMG cuádriceps” quedó guardada y aprobada con 10 diapositivas. Se incluye el guion hablado en inglés: 1.238 palabras y tiempos asignados que suman 10:00 (aproximadamente 124 palabras/minuto según el conteo textual). La exportación del diseño no se incorpora al repositorio.
+La presentación Canva “Defensa sEMG cuádriceps” quedó guardada con 10 diapositivas. La actualización actual incorpora las ecuaciones de FFT/PSD/MDF/MNF, la lista de características del benchmark y las figuras descriptivas revisadas. Se incluyen guiones sincronizados en inglés y español; el PDF del guion inglés F59 se genera desde el Markdown. La exportación completa del diseño Canva no se incorpora al repositorio.
 
 El DOCX completo más reciente queda fuera del paquete público porque incluye identidades de autor y resultados por grupo de participante. El informe público F31 continúa siendo histórico.
 
@@ -101,7 +109,7 @@ Para la señal centrada de cada ventana, RMS = sqrt((1/N) sum x_c[n]^2). Se esti
 - `bibliografia/`: las 44 referencias consolidadas en dos archivos BibTeX, sin cambios.
 - `datasets/README.md`: organización local segura; no incluye datos.
 - reports/: informe IEEE público F31, agregados F55, estado F54, resumen y heatmap por pierna/serie, nota metodológica y auditoría.
-- `presentation/`: guion hablado de 10 minutos en español, guion en inglés sincronizado con la presentación Canva, PDF F57 y generador reproducible del PDF. El generador usa la dependencia opcional en `presentation/requirements-pdf.txt`; no forma parte del entorno de análisis EMG.
+- `presentation/`: guiones hablados de 10 minutos F59 en español e inglés, sincronizados con la presentación Canva; PDF del guion inglés F59 y generador reproducible. El generador usa la dependencia opcional en `presentation/requirements-pdf.txt`; no forma parte del entorno de análisis EMG.
 - `manifest/SHA256SUMS`: hashes del paquete.
 
 El manifiesto contiene los SHA-256 de los bytes versionados de cada archivo rastreado, excepto el propio manifiesto. Así los hashes permanecen estables aunque un checkout de Windows convierta finales de línea LF/CRLF.
@@ -233,20 +241,27 @@ El repositorio también contiene una pantalla exploratoria de cruces sostenidos 
 
 No hay entradas ni evaluación de Borg/RPE en el paquete. Tampoco se publica un checkpoint ni un comando de inferencia listo para uso: el código existente entrena y evalúa el proxy de posición temporal con etiquetas, particiones y trazas privadas. No uses esas clases como etiquetas fisiológicas. Reproducir el benchmark F31 exige los archivos locales autorizados y sus recibos coincidentes; el demo sintético no reproduce sus métricas.
 
-## Ejecutar el análisis descriptivo de un CSV individual en Windows
+## Ejecutar el análisis descriptivo de un CSV o ZIP en Windows
 
-El lanzador procesa **una grabación CSV sin comprimir por ejecución**, con serie formal R1–R5. No acepta ZIP ni extrae archivos de archivos comprimidos. El selector y la CLI rechazan ZIP; también detectan ZIP renombrados con extensión `.csv`. Si tienes varias grabaciones, selecciona cada CSV por separado. En el primer uso, haz doble clic en `INSTALAR_TODO.bat`; después, en `INICIAR_INFERENCIA.bat`, selecciona un CSV y una carpeta privada para resultados. Para ejecutarlo desde la terminal integrada de Visual Studio Code:
+En el primer uso, haz doble clic en `INSTALAR_TODO.bat`; luego, haz doble clic en `INICIAR_INFERENCIA.bat`. El selector permite elegir un CSV formal R1–R5 o un ZIP con uno o más CSV de grabaciones, y después una carpeta local privada para resultados. No hace falta extraer manualmente el ZIP.
+
+El ZIP debe contener archivos con el encabezado `Relative_Time_s,ADC_Value[,Voltage_mV]`. Cada CSV debe tener una única serie formal R1–R5 en su nombre, por ejemplo `iz_R1.csv`, `dr-R3.csv` o `R2.csv` dentro de una carpeta `left`/`right`. `R0`/`R0_1` y miembros con esquema o nombre no compatible quedan listados como preliminares/no evaluables, no entran en el procesamiento formal. La herramienta rechaza ZIP dañados, rutas absolutas o con `..`, duplicados, enlaces simbólicos y miembros cifrados; limita un CSV a 512 MiB y la suma de CSV de un ZIP a 2 GiB.
+
+Para ejecutar un CSV desde la terminal integrada de Visual Studio Code:
 
 ```powershell
-.\.venv\Scripts\python.exe src\analizar_csv_emg.py --csv "C:\ruta\privada\iz_R1.csv" --output-dir "$env:LOCALAPPDATA\EMG_Biomecanica\Resultados"
+.\.venv\Scripts\python.exe src\analizar_zip_emg.py --csv "C:\ruta\privada\iz_R1.csv" --output-dir "$env:LOCALAPPDATA\EMG_Biomecanica\Resultados"
 ```
 
-El selector abre por defecto `%LOCALAPPDATA%\EMG_Biomecanica\Resultados` en Windows; si se elige otra carpeta, usa una ubicación con acceso restringido y evita rutas sincronizadas/compartidas. El programa rechaza salidas dentro del checkout, pero no verifica permisos, sincronización, copias de seguridad o retención del destino. También puedes abrir esta carpeta en Visual Studio Code: el intérprete queda configurado en `.venv` después de instalar.
+Para ejecutar un ZIP con varias grabaciones:
 
-La salida incluye un manifiesto para la grabación, eventos candidatos de actividad y un índice HTML con enlace al tablero. No se infiere identidad ni agrupamiento de participante, y el nombre original no se copia a las salidas. R0/R0_1 se rechazan porque son registros preliminares, no series formales. La ruta de resultados contiene señales y debe guardarse en almacenamiento autorizado.
+```powershell
+.\.venv\Scripts\python.exe src\analizar_zip_emg.py --zip "C:\ruta\privada\nuevos_participantes.zip" --output-dir "$env:LOCALAPPDATA\EMG_Biomecanica\Resultados"
+```
 
-Este lanzador **no carga un modelo**: no confirma repeticiones mecánicas y no predice ni valida fatiga fisiológica. No se ejecutó una inferencia sobre los dos pacientes porque no hay CSV individuales autorizados disponibles; tampoco se presenta una validación externa. Consulte `reports/F58_CSV_ONLY_UPDATE.md` para el cambio y las pruebas vigentes; `reports/F57_ONECLICK_STATUS.md` conserva el estado histórico anterior, cuando se había incluido la opción ZIP.
+El selector abre por defecto `%LOCALAPPDATA%\EMG_Biomecanica\Resultados` en Windows. Usa una ubicación con acceso restringido y evita rutas sincronizadas/compartidas. El programa rechaza salidas dentro del checkout, pero no verifica permisos, sincronización, copias de seguridad o retención. Las salidas incluyen un manifiesto por registro, candidatos de actividad, un índice HTML y tableros individuales; contienen señales procesadas y deben mantenerse en almacenamiento autorizado. No uses `participants.csv` como entrada.
 
+El nombre `INICIAR_INFERENCIA.bat` se conserva por compatibilidad, pero esta versión no hace inferencia de un modelo. No hay un checkpoint local de cuádriceps incluido ni un modelo predictivo desplegable: el benchmark disponible clasifica tercios temporales, no fatiga. El procesamiento de nuevos CSV o ZIP no predice repeticiones mecánicas ni niveles, probabilidades o localizaciones de fatiga. Los eventos son candidatos de actividad, no repeticiones verificadas. Consulta `reports/F59_CSV_ZIP_RUNNER_UPDATE.md` para pruebas y límites de esta actualización; `reports/F58_CSV_ONLY_UPDATE.md` es el antecedente histórico del bloqueo ZIP que este requerimiento más reciente reemplaza.
 ## Límites y uso
 
 La guía prescribe salida RAW y muestreo mínimo de 1 kHz por canal, además de ubicación de electrodos sobre recto femoral y ejercicio unilateral al 70 % de 1RM; esto define el protocolo objetivo, no certifica la adquisición de cada CSV. El intervalo mediano de timestamps es cercano a 1 ms (aproximadamente 1 kHz nominal), pero no identifica el reloj físico ni el ancho de banda analógico. En el archivo no se verifican por registro la modalidad RAW/RECT/ENV, calibración, sitio real del electrodo, carga, pausas, cadencia o repeticiones mecánicas. `Voltage_mV` reproduce una transformación aritmética de `ADC_Value`, no una calibración física validada. Por tanto, la conclusión correcta es que el estudio se dirige a un grupo muscular y ejercicio específicos, mientras los resultados disponibles describen tendencias del canal guardado y una tarea proxy; no demuestran fatiga fisiológica del recto femoral.

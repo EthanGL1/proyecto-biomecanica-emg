@@ -16,7 +16,7 @@ from reportlab.platypus import HRFlowable, PageBreak, Paragraph, SimpleDocTempla
 
 ROOT = Path(__file__).resolve().parent
 SOURCE = ROOT / "Canva_10_minute_speaker_script_EN.md"
-OUTPUT = ROOT / "Canva_10_minute_speaker_script_EN_F57.pdf"
+OUTPUT = ROOT / "Canva_10_minute_speaker_script_EN_F59.pdf"
 SLIDE_RE = re.compile(r"^## Slide (\d+) - (.+?) \((\d{2}:\d{2})\)$", re.MULTILINE)
 
 
@@ -66,7 +66,7 @@ def _draw_page(canvas, document) -> None:
     canvas.line(0.72 * inch, 0.58 * inch, width - 0.72 * inch, 0.58 * inch)
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(colors.HexColor("#526170"))
-    canvas.drawString(0.72 * inch, 0.38 * inch, "GROUP 4 | sEMG | F57 | 2026-10-28")
+    canvas.drawString(0.72 * inch, 0.38 * inch, "GROUP 4 | sEMG | F59 | 2026-10-28")
     canvas.drawRightString(width - 0.72 * inch, 0.38 * inch, f"Page {document.page}")
     canvas.restoreState()
 

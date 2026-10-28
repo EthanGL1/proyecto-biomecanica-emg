@@ -8,12 +8,11 @@ if not exist ".venv\Scripts\python.exe" (
   if errorlevel 1 exit /b 1
 )
 
-echo Este analisis calcula caracteristicas descriptivas y eventos candidatos de actividad.
-echo No cuenta repeticiones mecanicas ni predice fatiga fisiologica.
-echo Seleccione un CSV sin comprimir de una grabacion formal R1-R5.
-echo No se admiten ZIP; procese cada CSV individual por separado.
+echo Este flujo procesa descriptivamente CSV EMG o ZIPs que contienen CSVs.
+echo No carga un modelo, no cuenta repeticiones verificadas ni predice fatiga fisiologica.
+echo Seleccione un CSV formal R1-R5 o un ZIP con grabaciones CSV compatibles.
 echo.
-.venv\Scripts\python.exe src\analizar_csv_emg.py --pick
+.venv\Scripts\python.exe src\analizar_zip_emg.py --pick
 if errorlevel 1 (
   echo.
   echo El proceso no termino correctamente. Revise la entrada y conserve el mensaje de error.
