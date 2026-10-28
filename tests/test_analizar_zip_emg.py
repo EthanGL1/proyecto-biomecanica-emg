@@ -5,6 +5,7 @@ import zipfile
 import csv
 import io
 import math
+import json
 from contextlib import redirect_stdout
 from unittest.mock import patch
 from pathlib import Path
@@ -187,7 +188,8 @@ class SinglePageOverallReportTests(unittest.TestCase):
             self.assertIn("start / inicio", rendered)
             self.assertIn("middle / medio", rendered)
             self.assertIn("final / final", rendered)
-            self.assertIn("Fatigue label", rendered)
+            self.assertIn("Validated fatigue label", rendered)
+            self.assertIn("Exploratory screen state by filter branch", rendered)
             self.assertIn("Not evaluated", rendered)
             self.assertIn("temprana", rendered)
             self.assertIn("transicion", rendered)
@@ -258,6 +260,9 @@ class SinglePageOverallReportTests(unittest.TestCase):
             self.assertTrue(windows_path.is_file())
             self.assertTrue(phases_path.is_file())
             self.assertTrue(receipt_path.is_file())
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            self.assertEqual(receipt["screen_version"], 2)
+            self.assertIn("first third is used only as the baseline reference", receipt["persistence_rule"])
             with windows_path.open(encoding="utf-8", newline="") as handle:
                 windows = list(csv.DictReader(handle))
             with phases_path.open(encoding="utf-8", newline="") as handle:
@@ -274,10 +279,56 @@ class SinglePageOverallReportTests(unittest.TestCase):
             self.assertIn("fatigue-status-key", rendered)
             self.assertIn("Cambio espectral compatible con fatiga (exploratorio; no confirmado)", rendered)
             self.assertIn("Sin cruce sostenido del umbral (no demuestra ausencia de fatiga)", rendered)
-            self.assertIn("No evaluable: faltan ventanas activas o una línea basal estimable", rendered)
+            self.assertIn("faltan ventanas activas suficientes", rendered)
+            self.assertIn("una línea basal estimable", rendered)
             self.assertIn("no confirma fatiga fisiológica", rendered)
             self.assertIn("no equivale a “sin fatiga”", rendered)
-            self.assertIn("Conteo de esta ejecución:</strong> 2 cambio(s) espectral(es) compatible(s), exploratorio(s); 1 sin cruce sostenido; 0 no evaluable(s), de 3 combinaciones", rendered)
+            self.assertIn("Referencia basal (no se confirmó estado óptimo ni ausencia de fatiga)", rendered)
+            self.assertIn("1 referencia(s) basal(es)", rendered)
+            self.assertIn("2 cambio(s) espectral(es) compatible(s), exploratorio(s)", rendered)
+            self.assertIn("<th>Exploratory screen state by filter branch</th>", rendered)
+            self.assertIn("<strong>bp20_400</strong>: Baseline reference (not verified optimal or fatigue-free)", rendered)
+            self.assertIn("El inicio sirve solo como referencia basal; no se verifica como estado óptimo ni como ausencia de fatiga", rendered)
+
+            # A baseline window can fall below its own derived limit, but the first third is a
+            # reference period and must not be labeled as a fatigue outcome or seed persistence
+            # that crosses into the middle third.
+            with (recording_dir / "features.csv").open("w", encoding="utf-8", newline="") as handle:
+                fields = ["series", "run_index", "window_index", "time_s", "time_fraction",
+                          "time_position_proxy", "filter_branch", "sample_count", "rms_adc", "mdf_hz", "mnf_hz"]
+                writer = csv.DictWriter(handle, fieldnames=fields)
+                writer.writeheader()
+                for index in range(1, 61):
+                    time_s = 0.5 + (index - 1) * 0.5
+                    fraction = time_s / 30
+                    if index in {17, 19, 21, 23}:
+                        mdf, mnf = 40, 60
+                    elif fraction < 1 / 3:
+                        base = 100 if ((index - 1) // 2) % 2 == 0 else 101
+                        mdf, mnf = base, base + 40
+                    else:
+                        mdf, mnf = 100, 140
+                    proxy = "temprana" if fraction < 1 / 3 else "transicion" if fraction < 2 / 3 else "tardia"
+                    writer.writerow({
+                        "series": "R1", "run_index": 1, "window_index": index, "time_s": time_s,
+                        "time_fraction": fraction, "time_position_proxy": proxy,
+                        "filter_branch": "bp20_400", "sample_count": 1000,
+                        "rms_adc": 20, "mdf_hz": mdf, "mnf_hz": mnf,
+                    })
+
+            _render_index(run_dir, summary, manifest_rows)
+            with phases_path.open(encoding="utf-8", newline="") as handle:
+                boundary_phases = list(csv.DictReader(handle))
+            baseline_phase = next(row for row in boundary_phases if row["time_position_proxy"] == "temprana")
+            middle_phase = next(row for row in boundary_phases if row["time_position_proxy"] == "transicion")
+            self.assertEqual(baseline_phase["screen_status"], "baseline_reference")
+            self.assertEqual(middle_phase["screen_status"], "no_sustained_threshold_crossing")
+            self.assertEqual(middle_phase["n_sustained_crossing_windows"], "0")
+            with windows_path.open(encoding="utf-8", newline="") as handle:
+                boundary_windows = list(csv.DictReader(handle))
+            baseline_crossing_windows = [row for row in boundary_windows if row["time_position_proxy"] == "temprana" and row["below_mdf_threshold"] == "true" and row["below_mnf_threshold"] == "true"]
+            self.assertTrue(baseline_crossing_windows)
+            self.assertTrue(all(row["screen_status"] == "baseline_reference" for row in baseline_crossing_windows))
 
 
 class DiscoverSingleCsvTests(unittest.TestCase):
