@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import stat
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Iterable
 
+from analizar_umbral_senal_emg import robust_lower_threshold, sustained_crossings
 from release_paths import ReleasePathError, validate_data_paths
 
 
@@ -240,6 +242,353 @@ def _write_csv(path: Path, fields: Iterable[str], rows: Iterable[dict[str, objec
         writer.writerows(rows)
 
 
+def _derive_spectral_threshold_screen(
+    run_dir: Path,
+    record_rows: list[dict[str, object]],
+    events: list[dict[str, str]],
+    phases: tuple[tuple[str, str, float, float], ...],
+    processed_input_sha256: object = None,
+) -> list[dict[str, object]]:
+    """Write an explicitly exploratory robust-threshold screen; never a fatigue diagnosis."""
+    min_activity_occupancy = 0.50
+    phase_rows: list[dict[str, object]] = []
+    window_rows: list[dict[str, object]] = []
+    by_record: dict[str, list[dict[str, str]]] = {}
+    for event in events:
+        by_record.setdefault(event.get("recording_id", ""), []).append(event)
+
+    def finite_float(value: object) -> float | None:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if math.isfinite(parsed) else None
+
+    def display_status(status: str) -> str:
+        return {
+            "fatigue_compatible_change_exploratory": "Fatigue-compatible spectral change (exploratory; not confirmed)",
+            "no_sustained_threshold_crossing": "No sustained spectral threshold crossing (not proof of no fatigue)",
+            "not_evaluable": "Not evaluable",
+        }.get(status, status.replace("_", " "))
+
+    for record in record_rows:
+        recording_id = str(record.get("recording_id", ""))
+        recording_dir = run_dir / "recordings" / recording_id
+        features_path = recording_dir / "features.csv"
+        if not features_path.is_file():
+            continue
+
+        fs_by_run: dict[str, float] = {}
+        segment_path = recording_dir / "segments.csv"
+        if segment_path.is_file():
+            with segment_path.open("r", encoding="utf-8", newline="") as handle:
+                for segment in csv.DictReader(handle):
+                    fs = finite_float(segment.get("fs_hz"))
+                    if segment.get("status") == "processed" and fs and fs > 0:
+                        fs_by_run[str(segment.get("run_index", ""))] = fs
+
+        # Merge candidate intervals to avoid counting overlapping Otsu events twice.
+        intervals = sorted(
+            (start, end)
+            for event in by_record.get(recording_id, [])
+            if (start := finite_float(event.get("start_time_s"))) is not None
+            and (end := finite_float(event.get("end_time_s"))) is not None
+        )
+        merged_intervals: list[list[float]] = []
+        for start, end in intervals:
+            if start is None or end is None or end <= start:
+                continue
+            if not merged_intervals or start > merged_intervals[-1][1]:
+                merged_intervals.append([start, end])
+            else:
+                merged_intervals[-1][1] = max(merged_intervals[-1][1], end)
+
+        def occupancy_fraction(start: float, end: float) -> float:
+            duration = end - start
+            if duration <= 0:
+                return 0.0
+            overlap = sum(max(0.0, min(end, right) - max(start, left)) for left, right in merged_intervals)
+            return min(1.0, overlap / duration)
+
+        feature_rows: list[dict[str, object]] = []
+        with features_path.open("r", encoding="utf-8", newline="") as handle:
+            for feature in csv.DictReader(handle):
+                center = finite_float(feature.get("time_s"))
+                sample_count = finite_float(feature.get("sample_count"))
+                fs = fs_by_run.get(str(feature.get("run_index", "")))
+                duration = sample_count / fs if sample_count and fs else None
+                fraction = finite_float(feature.get("time_fraction"))
+                mdf = finite_float(feature.get("mdf_hz"))
+                mnf = finite_float(feature.get("mnf_hz"))
+                if center is None or duration is None or duration <= 0 or fraction is None:
+                    continue
+                window_start, window_end = center - duration / 2.0, center + duration / 2.0
+                proxy = str(feature.get("time_position_proxy", "")).strip().lower()
+                if proxy not in {phase[1] for phase in phases}:
+                    proxy = next((p[1] for p in phases if fraction < p[3]), phases[-1][1])
+                phase_label = next(p[0] for p in phases if p[1] == proxy)
+                feature_rows.append({
+                    **feature,
+                    "recording_id": recording_id,
+                    "participant_pseudonym": record.get("participant_pseudonym", ""),
+                    "side": record.get("side", ""),
+                    "series": record.get("series", ""),
+                    "time_s_value": center,
+                    "time_fraction_value": fraction,
+                    "window_start_s_value": window_start,
+                    "window_end_s_value": window_end,
+                    "mdf_value": mdf,
+                    "mnf_value": mnf,
+                    "proxy": proxy,
+                    "phase_label": phase_label,
+                    "activity_overlap_fraction": occupancy_fraction(window_start, window_end),
+                    "nonoverlap_window_used": False,
+                    "screen_segment_id": "",
+                    "screen_status": "overlapping_window_not_used_for_threshold_screen",
+                    "screen_reason": "overlapping_window_not_used_for_persistence_rule",
+                    "below_mdf_threshold": False,
+                    "below_mnf_threshold": False,
+                    "sustained_crossing": False,
+                })
+
+        # Keep every feature row, but choose non-overlapping windows for baseline and persistence.
+        branch_run_groups: dict[tuple[str, str], list[dict[str, object]]] = {}
+        for feature in feature_rows:
+            branch_run_groups.setdefault((str(feature.get("filter_branch", "")), str(feature.get("run_index", ""))), []).append(feature)
+        for group in branch_run_groups.values():
+            previous_end: float | None = None
+            screen_segment_id = 0
+            for feature in sorted(group, key=lambda item: (item["time_s_value"], int(str(item.get("window_index", 0))))):
+                start = float(feature["window_start_s_value"])
+                if previous_end is None or start >= previous_end - 1e-9:
+                    if previous_end is not None and start > previous_end + 0.0015:
+                        screen_segment_id += 1
+                    feature["nonoverlap_window_used"] = True
+                    feature["screen_segment_id"] = screen_segment_id
+                    previous_end = float(feature["window_end_s_value"])
+
+        by_branch: dict[str, list[dict[str, object]]] = {}
+        for feature in feature_rows:
+            by_branch.setdefault(str(feature.get("filter_branch", "unknown")), []).append(feature)
+
+        for branch, branch_features in by_branch.items():
+            independent = [feature for feature in branch_features if feature["nonoverlap_window_used"]]
+            baseline = [
+                feature for feature in independent
+                if feature["time_fraction_value"] < 1.0 / 3.0
+                and feature["activity_overlap_fraction"] >= min_activity_occupancy
+                and feature["mdf_value"] is not None and feature["mnf_value"] is not None
+            ]
+            mdf_threshold = robust_lower_threshold(
+                [feature["mdf_value"] for feature in baseline], baseline_fraction=1.0,
+                multiplier=1.96, minimum_windows=5,
+            )
+            mnf_threshold = robust_lower_threshold(
+                [feature["mnf_value"] for feature in baseline], baseline_fraction=1.0,
+                multiplier=1.96, minimum_windows=5,
+            )
+            thresholds_ready = mdf_threshold["status"] == "estimated" and mnf_threshold["status"] == "estimated"
+            mdf_lower = mdf_threshold["lower_threshold"] if thresholds_ready else None
+            mnf_lower = mnf_threshold["lower_threshold"] if thresholds_ready else None
+
+            grouped_by_run: dict[str, list[dict[str, object]]] = {}
+            for feature in independent:
+                grouped_by_run.setdefault(str(feature.get("run_index", "")), []).append(feature)
+            for run_features in grouped_by_run.values():
+                run_features.sort(key=lambda item: item["time_s_value"])
+                below_both: list[bool] = []
+                for feature in run_features:
+                    active = feature["activity_overlap_fraction"] >= min_activity_occupancy
+                    spectral_finite = feature["mdf_value"] is not None and feature["mnf_value"] is not None
+                    if not thresholds_ready:
+                        feature["screen_status"] = "not_evaluable"
+                        feature["screen_reason"] = f"baseline_not_estimable:mdf_{mdf_threshold['status']};mnf_{mnf_threshold['status']}"
+                    elif not spectral_finite:
+                        feature["screen_status"] = "not_evaluable"
+                        feature["screen_reason"] = "nonfinite_or_missing_spectral_metric"
+                    elif not active:
+                        feature["screen_status"] = "not_evaluable"
+                        feature["screen_reason"] = "candidate_activity_occupancy_below_50_percent"
+                    else:
+                        mdf_below = float(feature["mdf_value"]) < float(mdf_lower)
+                        mnf_below = float(feature["mnf_value"]) < float(mnf_lower)
+                        feature["below_mdf_threshold"] = mdf_below
+                        feature["below_mnf_threshold"] = mnf_below
+                        feature["screen_status"] = "isolated_threshold_crossing" if mdf_below and mnf_below else "no_sustained_threshold_crossing"
+                        feature["screen_reason"] = "joint_frequency_crossing_not_persistent" if mdf_below and mnf_below else "both_frequencies_not_below_their_thresholds"
+                    below_both.append(bool(feature["below_mdf_threshold"] and feature["below_mnf_threshold"]))
+                if thresholds_ready:
+                    for crossing in sustained_crossings(
+                        below_both,
+                        [int(feature["screen_segment_id"]) for feature in run_features],
+                        min_consecutive=3,
+                    ):
+                        start = crossing["start_window_index"]
+                        stop = start + crossing["duration_windows"]
+                        for feature in run_features[start:stop]:
+                            feature["sustained_crossing"] = True
+                            feature["screen_status"] = "fatigue_compatible_change_exploratory"
+                            feature["screen_reason"] = "both_mdf_and_mnf_below_threshold_for_three_consecutive_nonoverlapping_windows"
+
+            for feature in branch_features:
+                if not feature["nonoverlap_window_used"]:
+                    continue
+                feature.update({
+                    "mdf_baseline_median_hz": mdf_threshold["baseline_median"],
+                    "mdf_robust_scale_hz": mdf_threshold["robust_scale"],
+                    "mdf_lower_threshold_hz": mdf_lower,
+                    "mnf_baseline_median_hz": mnf_threshold["baseline_median"],
+                    "mnf_robust_scale_hz": mnf_threshold["robust_scale"],
+                    "mnf_lower_threshold_hz": mnf_lower,
+                    "baseline_window_count": len(baseline),
+                    "baseline_status": "estimated" if thresholds_ready else f"mdf_{mdf_threshold['status']};mnf_{mnf_threshold['status']}",
+                })
+            for feature in branch_features:
+                if feature["nonoverlap_window_used"]:
+                    continue
+                feature.update({
+                    "mdf_baseline_median_hz": mdf_threshold["baseline_median"],
+                    "mdf_robust_scale_hz": mdf_threshold["robust_scale"],
+                    "mdf_lower_threshold_hz": mdf_lower,
+                    "mnf_baseline_median_hz": mnf_threshold["baseline_median"],
+                    "mnf_robust_scale_hz": mnf_threshold["robust_scale"],
+                    "mnf_lower_threshold_hz": mnf_lower,
+                    "baseline_window_count": len(baseline),
+                    "baseline_status": "estimated" if thresholds_ready else f"mdf_{mdf_threshold['status']};mnf_{mnf_threshold['status']}",
+                })
+
+            for label, proxy, _, _ in phases:
+                phase_features = [feature for feature in branch_features if feature["proxy"] == proxy]
+                phase_independent = [feature for feature in phase_features if feature["nonoverlap_window_used"]]
+                active_phase = [feature for feature in phase_independent if feature["activity_overlap_fraction"] >= min_activity_occupancy and feature["mdf_value"] is not None and feature["mnf_value"] is not None]
+                sustained_phase = [feature for feature in active_phase if feature["sustained_crossing"]]
+                if not thresholds_ready or not active_phase:
+                    status = "not_evaluable"
+                    reason = "baseline_threshold_not_estimable" if not thresholds_ready else "no_candidate_active_spectral_windows"
+                elif sustained_phase:
+                    status = "fatigue_compatible_change_exploratory"
+                    reason = "persistent_joint_mdf_mnf_threshold_crossing"
+                else:
+                    status = "no_sustained_threshold_crossing"
+                    reason = "no_persistent_joint_mdf_mnf_threshold_crossing"
+                phase_rows.append({
+                    "recording_id": recording_id,
+                    "participant_pseudonym": record.get("participant_pseudonym", ""),
+                    "side": record.get("side", ""),
+                    "series": record.get("series", ""),
+                    "temporal_position": label,
+                    "time_position_proxy": proxy,
+                    "filter_branch": branch,
+                    "n_feature_windows": len(phase_features),
+                    "n_nonoverlap_windows": len(phase_independent),
+                    "n_activity_candidate_windows": len(active_phase),
+                    "n_baseline_windows": len(baseline),
+                    "baseline_status": "estimated" if thresholds_ready else f"mdf_{mdf_threshold['status']};mnf_{mnf_threshold['status']}",
+                    "mdf_baseline_median_hz": mdf_threshold["baseline_median"],
+                    "mdf_robust_scale_hz": mdf_threshold["robust_scale"],
+                    "mdf_lower_threshold_hz": mdf_lower,
+                    "mnf_baseline_median_hz": mnf_threshold["baseline_median"],
+                    "mnf_robust_scale_hz": mnf_threshold["robust_scale"],
+                    "mnf_lower_threshold_hz": mnf_lower,
+                    "n_joint_below_threshold_windows": sum(bool(feature["below_mdf_threshold"] and feature["below_mnf_threshold"]) for feature in phase_independent),
+                    "n_sustained_crossing_windows": len(sustained_phase),
+                    "screen_status": status,
+                    "screen_label": display_status(status),
+                    "screen_reason": reason,
+                    "fatigue_ground_truth_available": "false",
+                    "interpretation": "exploratory signal-change screen; not a validated fatigue or no-fatigue label",
+                })
+
+            for feature in branch_features:
+                window_rows.append({
+                    "recording_id": recording_id,
+                    "participant_pseudonym": record.get("participant_pseudonym", ""),
+                    "side": record.get("side", ""),
+                    "series": record.get("series", ""),
+                    "filter_branch": branch,
+                    "run_index": feature.get("run_index", ""),
+                    "window_index": feature.get("window_index", ""),
+                    "time_s": feature["time_s_value"],
+                    "time_fraction": feature["time_fraction_value"],
+                    "temporal_position": feature["phase_label"],
+                    "time_position_proxy": feature["proxy"],
+                    "window_start_s": feature["window_start_s_value"],
+                    "window_end_s": feature["window_end_s_value"],
+                    "activity_candidate_occupancy_fraction": feature["activity_overlap_fraction"],
+                    "nonoverlap_window_used": str(feature["nonoverlap_window_used"]).lower(),
+                    "contiguous_window_sequence": feature["screen_segment_id"],
+                    "baseline_window_count": feature.get("baseline_window_count", len(baseline)),
+                    "baseline_status": feature.get("baseline_status", "not_estimated"),
+                    "mdf_hz": feature.get("mdf_hz", ""),
+                    "mnf_hz": feature.get("mnf_hz", ""),
+                    "mdf_baseline_median_hz": feature.get("mdf_baseline_median_hz"),
+                    "mdf_robust_scale_hz": feature.get("mdf_robust_scale_hz"),
+                    "mdf_lower_threshold_hz": feature.get("mdf_lower_threshold_hz"),
+                    "mnf_baseline_median_hz": feature.get("mnf_baseline_median_hz"),
+                    "mnf_robust_scale_hz": feature.get("mnf_robust_scale_hz"),
+                    "mnf_lower_threshold_hz": feature.get("mnf_lower_threshold_hz"),
+                    "below_mdf_threshold": str(feature["below_mdf_threshold"]).lower(),
+                    "below_mnf_threshold": str(feature["below_mnf_threshold"]).lower(),
+                    "sustained_crossing": str(feature["sustained_crossing"]).lower(),
+                    "screen_status": feature["screen_status"],
+                    "screen_label": display_status(str(feature["screen_status"])),
+                    "screen_reason": feature["screen_reason"],
+                    "interpretation": "Otsu-derived candidate activity and robust spectral thresholds are exploratory; not fatigue ground truth",
+                })
+
+    window_fields = (
+        "recording_id", "participant_pseudonym", "side", "series", "filter_branch", "run_index", "window_index",
+        "time_s", "time_fraction", "temporal_position", "time_position_proxy", "window_start_s", "window_end_s",
+        "activity_candidate_occupancy_fraction", "nonoverlap_window_used", "contiguous_window_sequence",
+        "baseline_window_count", "baseline_status", "mdf_hz", "mnf_hz", "mdf_baseline_median_hz",
+        "mdf_robust_scale_hz", "mdf_lower_threshold_hz", "mnf_baseline_median_hz", "mnf_robust_scale_hz",
+        "mnf_lower_threshold_hz", "below_mdf_threshold", "below_mnf_threshold", "sustained_crossing",
+        "screen_status", "screen_label", "screen_reason", "interpretation",
+    )
+    phase_fields = (
+        "recording_id", "participant_pseudonym", "side", "series", "temporal_position", "time_position_proxy",
+        "filter_branch", "n_feature_windows", "n_nonoverlap_windows", "n_activity_candidate_windows",
+        "n_baseline_windows", "baseline_status", "mdf_baseline_median_hz", "mdf_robust_scale_hz",
+        "mdf_lower_threshold_hz", "mnf_baseline_median_hz", "mnf_robust_scale_hz", "mnf_lower_threshold_hz",
+        "n_joint_below_threshold_windows", "n_sustained_crossing_windows", "screen_status", "screen_label",
+        "screen_reason", "fatigue_ground_truth_available", "interpretation",
+    )
+    windows_path = run_dir / "fatigue_threshold_windows.csv"
+    phases_path = run_dir / "fatigue_threshold_phases.csv"
+    receipt_path = run_dir / "fatigue_threshold_receipt.json"
+    _write_csv(windows_path, window_fields, window_rows)
+    _write_csv(phases_path, phase_fields, phase_rows)
+    receipt = {
+        "analysis": "exploratory_spectral_change_threshold_screen",
+        "processed_input_sha256": processed_input_sha256,
+        "processed_input_note": "SHA-256 of the normalized ZIP consumed by this processor; when the user supplied a RAR, this is not the original RAR checksum.",
+        "fatigue_ground_truth_available": False,
+        "validated_fatigue_classifier_used": False,
+        "clinical_fatigue_labels_emitted": False,
+        "screen_status_categories": [
+            "fatigue_compatible_change_exploratory",
+            "no_sustained_threshold_crossing",
+            "not_evaluable",
+        ],
+        "screen_status_interpretation": "Signal-change screen only. No-crossing does not establish absence of fatigue; exploratory crossing is not confirmed fatigue.",
+        "baseline_definition": "First elapsed-time third; candidate-active windows with finite MDF and MNF; at least five non-overlapping windows per recording and filter branch.",
+        "lower_threshold_formula": "median(baseline) - 1.96 * 1.4826 * MAD(baseline)",
+        "mad_zero_rule": "threshold not estimable",
+        "activity_candidate_mask": "Union of Otsu RMS-envelope candidate intervals; a window requires at least 50% candidate-interval overlap. Candidate intervals are not verified contractions.",
+        "source_windowing": "1.0 s windows with 50% overlap from the descriptive processor; every other contiguous window is retained for the threshold screen to avoid overlapping persistence observations.",
+        "persistence_rule": "MDF and MNF both strictly below their separate lower thresholds for at least three consecutive non-overlapping windows within one contiguous run.",
+        "filter_branches": sorted({str(row.get("filter_branch", "")) for row in window_rows}),
+        "window_rows": len(window_rows),
+        "phase_rows": len(phase_rows),
+        "outputs": {
+            "fatigue_threshold_windows.csv": _sha256(windows_path),
+            "fatigue_threshold_phases.csv": _sha256(phases_path),
+        },
+    }
+    receipt_path.write_text(json.dumps(receipt, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return phase_rows
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -267,6 +616,37 @@ def _render_index(run_dir: Path, summary: dict[str, object], rows: list[dict[str
             return fallback
         return result if result == result and abs(result) != float("inf") else fallback
 
+    def finite_values(values: list[object]) -> list[float]:
+        parsed: list[float] = []
+        for value in values:
+            try:
+                candidate = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(candidate):
+                parsed.append(candidate)
+        return parsed
+
+    phases = (
+        ("start / inicio", "temprana", 0.0, 1.0 / 3.0),
+        ("middle / medio", "transicion", 1.0 / 3.0, 2.0 / 3.0),
+        ("final / final", "tardia", 2.0 / 3.0, 1.0),
+    )
+
+    def temporal_phase(fraction: float) -> tuple[str, str]:
+        bounded = min(1.0, max(0.0, fraction))
+        for label, proxy, lower, upper in phases:
+            if bounded < upper or upper == 1.0:
+                return label, proxy
+        return phases[-1][0], phases[-1][1]
+
+    def optional_number(value: object, decimals: int = 3) -> str:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return "not available"
+        return f"{parsed:.{decimals}f}" if math.isfinite(parsed) else "not available"
+
     record_rows: list[dict[str, object]] = []
     max_time = 0.0
     total_continuous_s = 0.0
@@ -291,23 +671,48 @@ def _render_index(run_dir: Path, summary: dict[str, object], rows: list[dict[str
         segment_path = run_dir / "recordings" / recording_id / "segments.csv"
         continuous_s = 0.0
         record_end = max((number(event.get("end_time_s")) for event in record_events), default=0.0)
+        record_start = min((number(event.get("start_time_s")) for event in record_events), default=0.0)
+        segment_starts: list[float] = []
         if segment_path.is_file():
             with segment_path.open("r", encoding="utf-8", newline="") as handle:
                 for segment in csv.DictReader(handle):
                     if segment.get("status") == "processed":
                         start = number(segment.get("start_time_s"))
                         end = number(segment.get("end_time_s"), start)
+                        segment_starts.append(start)
                         continuous_s += max(0.0, end - start)
                         record_end = max(record_end, end)
+        if segment_starts:
+            record_start = min(segment_starts)
+        time_span = max(0.0, record_end - record_start)
+        phase_counts = {proxy: {"count": 0, "duration_s": 0.0} for _, proxy, _, _ in phases}
+        for event in record_events:
+            start = number(event.get("start_time_s"))
+            end = max(start, number(event.get("end_time_s"), start))
+            midpoint_fraction = (0.5 * (start + end) - record_start) / time_span if time_span else 0.0
+            phase_label, phase_proxy = temporal_phase(midpoint_fraction)
+            event["_temporal_phase"] = phase_label
+            event["_phase_proxy"] = phase_proxy
+            phase_counts[phase_proxy]["count"] += 1
+            phase_counts[phase_proxy]["duration_s"] += max(0.0, end - start)
         total_continuous_s += continuous_s
         max_time = max(max_time, record_end)
         record_rows.append({
             **row,
             "events": record_events,
             "lane_count": max(1, len(lane_ends)),
+            "time_start_s": record_start,
             "time_end_s": record_end,
+            "phase_counts": phase_counts,
             "continuous_duration_s": continuous_s,
         })
+    screen_phase_rows = _derive_spectral_threshold_screen(
+        run_dir, record_rows, events, phases, summary.get("input_zip_sha256")
+    )
+    screen_by_phase = {
+        (str(row["recording_id"]), str(row["time_position_proxy"]), str(row["filter_branch"])): row
+        for row in screen_phase_rows
+    }
     max_time = max(max_time, 1.0)
 
     width, left, right = 1360, 310, 36
@@ -399,6 +804,65 @@ def _render_index(run_dir: Path, summary: dict[str, object], rows: list[dict[str
                 "recording_id", "participant_pseudonym", "side", "series", "status", "candidate_event_count"
             )) + f'<td>{number(item["continuous_duration_s"]):.2f}</td></tr>'
         )
+    temporal_rows = []
+    for item in record_rows:
+        for label, proxy, _, _ in phases:
+            phase_summary = item["phase_counts"][proxy]
+            temporal_rows.append(
+                "<tr>" + "".join(f"<td>{html.escape(str(value))}</td>" for value in (
+                    item.get("recording_id", ""), item.get("participant_pseudonym", "") or "Group unknown",
+                    item.get("side", ""), item.get("series", ""), label, proxy,
+                    phase_summary["count"], f'{phase_summary["duration_s"]:.3f}', "Not evaluated",
+                )) + "</tr>"
+            )
+
+    feature_summary_rows = []
+    for item in record_rows:
+        recording_id = str(item.get("recording_id", ""))
+        feature_path = run_dir / "recordings" / recording_id / "features.csv"
+        buckets: dict[tuple[str, str], dict[str, list[object]]] = {}
+        if feature_path.is_file():
+            with feature_path.open("r", encoding="utf-8", newline="") as handle:
+                for feature in csv.DictReader(handle):
+                    proxy = str(feature.get("time_position_proxy", "")).strip().lower()
+                    matching_phase = next((phase for phase in phases if phase[1] == proxy), None)
+                    if matching_phase is None:
+                        _, proxy = temporal_phase(number(feature.get("time_fraction")))
+                        matching_phase = next(phase for phase in phases if phase[1] == proxy)
+                    phase_label = matching_phase[0]
+                    branch = str(feature.get("filter_branch", "unknown")) or "unknown"
+                    bucket = buckets.setdefault((proxy, branch), {"rms": [], "mdf": [], "mnf": [], "count": []})
+                    bucket["count"].append(1)
+                    bucket["rms"].append(feature.get("rms_adc"))
+                    bucket["mdf"].append(feature.get("mdf_hz"))
+                    bucket["mnf"].append(feature.get("mnf_hz"))
+        for (proxy, branch), bucket in sorted(buckets.items(), key=lambda pair: (pair[0][0], pair[0][1])):
+            phase_label = next(phase[0] for phase in phases if phase[1] == proxy)
+            screen = screen_by_phase.get((recording_id, proxy, branch), {})
+            rms_values = finite_values(bucket["rms"])
+            mdf_values = finite_values(bucket["mdf"])
+            mnf_values = finite_values(bucket["mnf"])
+            feature_summary_rows.append(
+                "<tr>" + "".join(f"<td>{html.escape(str(value))}</td>" for value in (
+                    recording_id, item.get("participant_pseudonym", "") or "Group unknown",
+                    item.get("side", ""), item.get("series", ""), phase_label, proxy, branch,
+                    len(bucket["count"]),
+                    f"{statistics.median(rms_values):.3f}" if rms_values else "not available",
+                    f"{statistics.median(mdf_values):.3f}" if mdf_values else "not available",
+                    f"{statistics.median(mnf_values):.3f}" if mnf_values else "not available",
+                    screen.get("n_activity_candidate_windows", 0),
+                    screen.get("n_baseline_windows", 0),
+                    screen.get("baseline_status", "not available"),
+                    optional_number(screen.get("mdf_lower_threshold_hz")),
+                    optional_number(screen.get("mdf_robust_scale_hz")),
+                    optional_number(screen.get("mnf_lower_threshold_hz")),
+                    optional_number(screen.get("mnf_robust_scale_hz")),
+                    screen.get("n_sustained_crossing_windows", 0),
+                    screen.get("screen_label", "Not evaluable"),
+                    screen.get("screen_reason", "not available"),
+                )) + "</tr>"
+            )
+
     event_table_rows = []
     for event in sorted(events, key=lambda item: (
         item.get("participant_pseudonym", ""), item.get("side", ""), item.get("series", ""),
@@ -412,6 +876,7 @@ def _render_index(run_dir: Path, summary: dict[str, object], rows: list[dict[str
             f"{start:.3f}-{end:.3f}", f"{max(0.0, end-start):.3f}",
             f"{number(event.get('threshold_rms_adc')):.2f}", f"{number(event.get('mean_rms_adc')):.2f}",
             f"{number(event.get('peak_rms_adc')):.2f}", event.get("quality", ""),
+            event.get("_temporal_phase", "not available"), "Not evaluated",
         )
         event_table_rows.append("<tr>" + "".join(f"<td>{html.escape(str(value))}</td>" for value in fields) + "</tr>")
 
@@ -433,12 +898,14 @@ th,td{{border:1px solid #d5dde5;padding:6px 8px;text-align:left;font-variant-num
 <h1>EMG activity candidates — complete run overview</h1>
 <p class="sub">One page for all CSVs in this run. Recording-specific time axes remain separate; no artificial continuous timeline is created.</p>
 <div class="warning"><strong>Model status:</strong> no predictive model was loaded. The intervals below are exploratory activity candidates from an RMS-envelope threshold, not verified mechanical repetitions.</div>
-<div class="fatigue"><strong>Fatigue prediction: unavailable.</strong> This run does not contain a validated quadriceps-fatigue model or independent fatigue labels. The system does not mark fatigue times or levels.</div>
+<div class="fatigue"><strong>Validated fatigue prediction: unavailable.</strong> This run has no independent fatigue labels or validated fatigue classifier. The separate robust-threshold screen below flags exploratory spectral changes only; it does not confirm fatigue, and no threshold crossing does not establish absence of fatigue.</div>
 <div class="status"><div><strong>{summary.get('csv_count', 0)}</strong><span>CSV files recognized</span></div><div><strong>{summary.get('processed_count', 0)}</strong><span>recordings processed</span></div><div><strong>{summary.get('candidate_event_count', 0)}</strong><span>activity candidates</span></div><div><strong>{total_continuous_s/60:.1f} min</strong><span>summed continuous recording duration; files remain separate</span></div><div><strong>No</strong><span>model loaded or fatigue scores emitted</span></div></div>
 <section class="section"><h2>All event times across all recordings</h2><figure>{timeline_svg}</figure><p class="note">Each row uses the recording's own time from its start. If candidate intervals overlap within a recording, the chart stacks them in separate lanes without merging or dropping events. Bars mark threshold-derived intervals only.</p></section>
 <section class="section"><h2>Candidate intervals by series and side</h2><figure>{count_svg}</figure><p class="note">Counts include all exported activity candidates; they are not repetition counts.</p></section>
 <section class="section"><h2>Recording inventory</h2><div class="table-wrap"><table><thead><tr><th>Recording</th><th>Group</th><th>Side</th><th>Series</th><th>Status</th><th>Activity candidates</th><th>Summed continuous time (s)</th></tr></thead><tbody>{''.join(manifest_rows)}</tbody></table></div></section>
-<section class="section"><h2>Complete candidate event table</h2><label for="event-search">Filter rows by recording, group, side, series, time, or quality</label><br><input id="event-search" type="search" placeholder="Search this table"><div class="table-wrap"><table id="event-table"><thead><tr><th>Recording</th><th>Group</th><th>Side</th><th>Series</th><th>Candidate</th><th>Start-end (s)</th><th>Duration (s)</th><th>Envelope threshold (ADC)</th><th>Mean RMS (ADC)</th><th>Peak RMS (ADC)</th><th>Quality status</th></tr></thead><tbody>{''.join(event_table_rows)}</tbody></table></div></section>
+<section class="section"><h2>Temporal thirds (time-position proxy, not fatigue labels)</h2><p class="note">Start, middle and final refer only to thirds of each recording's elapsed-time span. Event candidates are assigned by their midpoint. These positions are not fatigue/no-fatigue classes.</p><div class="table-wrap"><table><thead><tr><th>Recording</th><th>Group</th><th>Side</th><th>Series</th><th>Temporal position</th><th>Stored proxy</th><th>Activity candidates</th><th>Candidate duration (s)</th><th>Fatigue label</th></tr></thead><tbody>{''.join(temporal_rows)}</tbody></table></div></section>
+<section class="section"><h2>Windowed feature summaries and exploratory spectral threshold screen</h2><p class="note">Start, middle and final are elapsed-time thirds. Median RMS is in ADC counts; MDF and MNF are in Hz. For each recording and filter branch, the lower reference threshold is median of candidate-active windows in the first third minus 1.96 × 1.4826 × MAD; at least five baseline windows are required and zero MAD is not estimable. A screen crossing requires both MDF and MNF below their thresholds for three consecutive non-overlapping one-second windows in the same continuous run. The activity mask is the Otsu envelope candidate interval set, with at least 50% of a window overlapping it. These are exploratory signal-change categories, not fatigue/no-fatigue labels.</p><p class="note">Full window-level values and decisions are in fatigue_threshold_windows.csv; phase summaries and thresholds are in fatigue_threshold_phases.csv; calculation settings and hashes are in fatigue_threshold_receipt.json. All detailed EMG outputs remain in this local results folder.</p><div class="table-wrap"><table><thead><tr><th>Recording</th><th>Group</th><th>Side</th><th>Series</th><th>Temporal position</th><th>Stored proxy</th><th>Filter branch</th><th>Feature windows</th><th>Median RMS (ADC)</th><th>Median MDF (Hz)</th><th>Median MNF (Hz)</th><th>Candidate-active independent windows</th><th>Baseline windows</th><th>Baseline status</th><th>MDF lower threshold (Hz)</th><th>MDF robust scale (Hz)</th><th>MNF lower threshold (Hz)</th><th>MNF robust scale (Hz)</th><th>Sustained crossing windows</th><th>Exploratory screen result</th><th>Screen reason</th></tr></thead><tbody>{''.join(feature_summary_rows)}</tbody></table></div></section>
+<section class="section"><h2>Complete candidate event table</h2><label for="event-search">Filter rows by recording, group, side, series, time, temporal position, fatigue status, or quality</label><br><input id="event-search" type="search" placeholder="Search this table"><div class="table-wrap"><table id="event-table"><thead><tr><th>Recording</th><th>Group</th><th>Side</th><th>Series</th><th>Candidate</th><th>Start-end (s)</th><th>Duration (s)</th><th>Envelope threshold (ADC)</th><th>Mean RMS (ADC)</th><th>Peak RMS (ADC)</th><th>Quality status</th><th>Temporal position</th><th>Fatigue status</th></tr></thead><tbody>{''.join(event_table_rows)}</tbody></table></div></section>
 <p class="note">The stored Voltage_mV column is not validated as a physical calibration. ADC amplitude is reported in counts. Keep this report and source-derived results in restricted storage.</p>
 <script>document.getElementById('event-search').addEventListener('input',function(){{const q=this.value.toLowerCase();for(const row of document.querySelectorAll('#event-table tbody tr'))row.hidden=!row.textContent.toLowerCase().includes(q)}});</script>
 </body></html>"""

@@ -147,7 +147,7 @@ class SinglePageOverallReportTests(unittest.TestCase):
                      "threshold_rms_adc": 4, "mean_rms_adc": 6, "peak_rms_adc": 8,
                      "quality": "common_mask_valid", "interpretation": "candidate_activity_only"},
                     {"recording_id": "REC0002", "participant_pseudonym": "P02", "side": "left", "series": "R5",
-                     "event_candidate_index": 1, "start_time_s": 2, "end_time_s": 3, "duration_s": 1,
+                     "event_candidate_index": 1, "start_time_s": 3, "end_time_s": 3.8, "duration_s": 0.8,
                      "threshold_rms_adc": 4, "mean_rms_adc": 5, "peak_rms_adc": 7,
                      "quality": "common_mask_valid", "interpretation": "candidate_activity_only"},
                 ])
@@ -160,6 +160,14 @@ class SinglePageOverallReportTests(unittest.TestCase):
             (run_dir / "recordings" / "REC0002" / "segments.csv").write_text(
                 "series,run_index,start_time_s,end_time_s,fs_hz,interval_spread_ratio,sample_count,common_valid_samples,excluded_edge_samples,status\n"
                 "R5,1,0,4,1000,0,4000,3900,100,processed\n", encoding="utf-8"
+            )
+            features_header = "series,run_index,window_index,time_s,time_fraction,time_position_proxy,filter_branch,sample_count,rms_adc,mdf_hz,mnf_hz\n"
+            (run_dir / "recordings" / "REC0001" / "features.csv").write_text(
+                features_header
+                + "R1,1,1,1,0.2,temprana,bp20_400,1000,10,80,90\n"
+                + "R1,1,2,2,0.4,transicion,bp20_400,1000,11,75,88\n"
+                + "R1,1,3,4,0.8,tardia,bp20_400,1000,12,70,84\n",
+                encoding="utf-8",
             )
             summary = {
                 "csv_count": 2, "processed_count": 2, "skipped_count": 0, "candidate_event_count": 3,
@@ -174,10 +182,95 @@ class SinglePageOverallReportTests(unittest.TestCase):
             self.assertIn("data-lane=\"0\"", rendered)
             self.assertIn("data-lane=\"1\"", rendered)
             self.assertIn("REC0002", rendered)
-            self.assertIn("Fatigue prediction: unavailable", rendered)
+            self.assertIn("Validated fatigue prediction: unavailable", rendered)
+            self.assertIn("Temporal thirds (time-position proxy, not fatigue labels)", rendered)
+            self.assertIn("start / inicio", rendered)
+            self.assertIn("middle / medio", rendered)
+            self.assertIn("final / final", rendered)
+            self.assertIn("Fatigue label", rendered)
+            self.assertIn("Not evaluated", rendered)
+            self.assertIn("temprana", rendered)
+            self.assertIn("transicion", rendered)
+            self.assertIn("tardia", rendered)
             self.assertIn("0.000-2.000", rendered)
             self.assertNotIn("recordings/REC0001/dashboard.html", rendered)
             self.assertNotIn("<a href=", rendered)
+
+    def test_threshold_screen_labels_persistent_mdf_mnf_change_as_exploratory(self):
+        with tempfile.TemporaryDirectory() as temp_name:
+            run_dir = Path(temp_name)
+            recording_dir = run_dir / "recordings" / "REC0001"
+            recording_dir.mkdir(parents=True)
+            manifest_rows = [{
+                "recording_id": "REC0001", "participant_pseudonym": "P01", "side": "right",
+                "series": "R1", "status": "processed", "candidate_event_count": 1,
+                "output_folder": "recordings/REC0001",
+            }]
+            with (run_dir / "activity_event_candidates.csv").open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=[
+                    "recording_id", "participant_pseudonym", "side", "series", "event_candidate_index",
+                    "start_time_s", "end_time_s", "duration_s", "threshold_rms_adc", "mean_rms_adc",
+                    "peak_rms_adc", "quality", "interpretation",
+                ])
+                writer.writeheader()
+                writer.writerow({
+                    "recording_id": "REC0001", "participant_pseudonym": "P01", "side": "right", "series": "R1",
+                    "event_candidate_index": 1, "start_time_s": 0, "end_time_s": 30, "duration_s": 30,
+                    "threshold_rms_adc": 4, "mean_rms_adc": 5, "peak_rms_adc": 7,
+                    "quality": "common_mask_valid", "interpretation": "candidate_activity_only",
+                })
+            (recording_dir / "segments.csv").write_text(
+                "series,run_index,start_time_s,end_time_s,fs_hz,interval_spread_ratio,sample_count,common_valid_samples,excluded_edge_samples,status\n"
+                "R1,1,0,30,1000,0,30000,29900,100,processed\n", encoding="utf-8"
+            )
+            with (recording_dir / "features.csv").open("w", encoding="utf-8", newline="") as handle:
+                fields = ["series", "run_index", "window_index", "time_s", "time_fraction",
+                          "time_position_proxy", "filter_branch", "sample_count", "rms_adc", "mdf_hz", "mnf_hz"]
+                writer = csv.DictWriter(handle, fieldnames=fields)
+                writer.writeheader()
+                for index in range(1, 61):
+                    time_s = 0.5 + (index - 1) * 0.5
+                    fraction = time_s / 30
+                    if fraction < 1 / 3:
+                        baseline_level = 100 if ((index - 1) // 2) % 2 == 0 else 104
+                        mdf, mnf = baseline_level, baseline_level + 40
+                        proxy = "temprana"
+                    else:
+                        mdf, mnf = (50, 80) if time_s >= 15 else (101, 141)
+                        proxy = "transicion" if fraction < 2 / 3 else "tardia"
+                    writer.writerow({
+                        "series": "R1", "run_index": 1, "window_index": index, "time_s": time_s,
+                        "time_fraction": fraction, "time_position_proxy": proxy,
+                        "filter_branch": "bp20_400", "sample_count": 1000,
+                        "rms_adc": 20, "mdf_hz": mdf, "mnf_hz": mnf,
+                    })
+            summary = {
+                "csv_count": 1, "processed_count": 1, "skipped_count": 0, "candidate_event_count": 1,
+                "model_loaded": False, "mechanical_repetition_prediction": None,
+                "physiological_fatigue_prediction": None,
+            }
+
+            _render_index(run_dir, summary, manifest_rows)
+
+            windows_path = run_dir / "fatigue_threshold_windows.csv"
+            phases_path = run_dir / "fatigue_threshold_phases.csv"
+            receipt_path = run_dir / "fatigue_threshold_receipt.json"
+            self.assertTrue(windows_path.is_file())
+            self.assertTrue(phases_path.is_file())
+            self.assertTrue(receipt_path.is_file())
+            with windows_path.open(encoding="utf-8", newline="") as handle:
+                windows = list(csv.DictReader(handle))
+            with phases_path.open(encoding="utf-8", newline="") as handle:
+                phases = list(csv.DictReader(handle))
+            crossing_rows = [row for row in windows if row["screen_status"] == "fatigue_compatible_change_exploratory"]
+            self.assertGreaterEqual(len(crossing_rows), 3)
+            middle = next(row for row in phases if row["time_position_proxy"] == "transicion")
+            self.assertEqual(middle["screen_status"], "fatigue_compatible_change_exploratory")
+            self.assertAlmostEqual(float(middle["mdf_lower_threshold_hz"]), 102 - 1.96 * 1.4826 * 2)
+            self.assertEqual(middle["fatigue_ground_truth_available"], "false")
+            rendered = (run_dir / "index.html").read_text(encoding="utf-8")
+            self.assertIn("No sustained spectral threshold crossing (not proof of no fatigue)", rendered)
+            self.assertIn("Fatigue-compatible spectral change (exploratory; not confirmed)", rendered)
 
 
 class DiscoverSingleCsvTests(unittest.TestCase):
