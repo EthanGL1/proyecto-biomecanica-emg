@@ -233,11 +233,17 @@ El repositorio también contiene una pantalla exploratoria de cruces sostenidos 
 
 No hay entradas ni evaluación de Borg/RPE en el paquete. Tampoco se publica un checkpoint ni un comando de inferencia listo para uso: el código existente entrena y evalúa el proxy de posición temporal con etiquetas, particiones y trazas privadas. No uses esas clases como etiquetas fisiológicas. Reproducir el benchmark F31 exige los archivos locales autorizados y sus recibos coincidentes; el demo sintético no reproduce sus métricas.
 
-## Ejecutar el análisis descriptivo de un ZIP en Windows
+## Ejecutar el análisis descriptivo de un ZIP o CSV en Windows
 
-En la rama F57 se añadió un lanzador que procesa en lote los CSV compatibles del ZIP con el procesador descriptivo existente. En el primer uso, haga doble clic en `INSTALAR_TODO.bat`; después, haga doble clic en `INICIAR_INFERENCIA.bat`, seleccione el ZIP y elija una carpeta privada de salida. El selector abre por defecto `%LOCALAPPDATA%\EMG_Biomecanica\Resultados` en Windows; si se elige otra carpeta, use una ubicación con acceso restringido y evite rutas sincronizadas/compartidas. El programa solo puede rechazar salidas dentro del checkout: no verifica permisos, sincronización, copias de seguridad o retención del destino. También puede abrir esta carpeta en Visual Studio Code: el intérprete queda configurado en `.venv` después de instalar.
+En la rama F57 se añadió un lanzador que procesa los CSV compatibles de un ZIP o una grabación individual CSV con el procesador descriptivo existente. En el primer uso, haga doble clic en `INSTALAR_TODO.bat`; después, haga doble clic en `INICIAR_INFERENCIA.bat`, seleccione un ZIP o un CSV individual R1–R5 y elija una carpeta privada de resultados. Para ejecutar directamente desde la ruta de un CSV en la terminal integrada de Visual Studio Code:
 
-La salida incluye un manifiesto por grabación, eventos candidatos de actividad y un índice HTML con enlaces a los tableros. Las etiquetas laterales/series se leen de la ruta del archivo y seudonimizan cuando la estructura permite agrupar carpetas; los nombres originales no se copian a las salidas. Los registros R0/R0_1 se conservan como controles preliminares y no se procesan como series formales. La ruta de resultados contiene señales y debe guardarse en almacenamiento autorizado.
+```powershell
+.\.venv\Scripts\python.exe src\analizar_zip_emg.py --csv "C:\ruta\privada\iz_R1.csv" --output-dir "$env:LOCALAPPDATA\EMG_Biomecanica\Resultados"
+```
+
+Para procesar un ZIP desde la terminal, sustituya `--csv` por `--zip`. El selector abre por defecto `%LOCALAPPDATA%\EMG_Biomecanica\Resultados` en Windows; si se elige otra carpeta, use una ubicación con acceso restringido y evite rutas sincronizadas/compartidas. El programa solo puede rechazar salidas dentro del checkout: no verifica permisos, sincronización, copias de seguridad o retención del destino. También puede abrir esta carpeta en Visual Studio Code: el intérprete queda configurado en `.venv` después de instalar.
+
+La salida incluye un manifiesto por grabación, eventos candidatos de actividad y un índice HTML con enlaces a los tableros. En ZIP, las etiquetas laterales/series se leen de la ruta del archivo y seudonimizan cuando la estructura permite agrupar carpetas; para un CSV individual no se infieren identidad ni agrupamiento por participante. Los nombres originales no se copian a las salidas. Los registros R0/R0_1 se conservan como controles preliminares y no se procesan como series formales. La ruta de resultados contiene señales y debe guardarse en almacenamiento autorizado.
 
 Este lanzador **no carga un modelo**: no confirma repeticiones mecánicas y no predice ni valida fatiga fisiológica. El ZIP independiente de dos pacientes no forma parte de las entradas disponibles para esta revisión; no se presentan resultados por paciente ni se llama a esta ejecución validación externa. El guion F57 explica el procedimiento de un clic como análisis descriptivo y presenta únicamente resultados agregados verificados. Consulte `reports/F57_ONECLICK_STATUS.md` para las pruebas efectivamente realizadas y el alcance comprobado.
 

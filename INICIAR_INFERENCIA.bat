@@ -10,7 +10,7 @@ if not exist ".venv\Scripts\python.exe" (
 
 echo Este analisis calcula caracteristicas descriptivas y eventos candidatos de actividad.
 echo No cuenta repeticiones mecanicas ni predice fatiga fisiologica.
-echo Elija el ZIP de datos y una carpeta privada para las salidas.
+echo Elija un ZIP o un CSV individual R1-R5 y una carpeta privada para las salidas.
 echo.
 .venv\Scripts\python.exe src\analizar_zip_emg.py --pick
 if errorlevel 1 (

@@ -198,6 +198,36 @@ def discover_recordings(zip_path: Path | str) -> list[ZipRecording]:
     return records
 
 
+def discover_single_csv(csv_path: Path | str) -> ZipRecording:
+    """Validate one caller-supplied EMG CSV without assigning a participant label."""
+    path = Path(csv_path).expanduser().resolve(strict=True)
+    if not path.is_file() or path.suffix.lower() != ".csv":
+        raise ArchiveSafetyError("Seleccione un archivo CSV válido.")
+    if path.stat().st_size > MAX_CSV_BYTES:
+        raise ArchiveSafetyError("El CSV excede el límite de 512 MiB.")
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            header = tuple(cell.strip() for cell in next(csv.reader(handle), []))
+    except (OSError, UnicodeDecodeError, csv.Error) as error:
+        raise ArchiveSafetyError("No se pudo leer el encabezado del CSV.") from error
+    series, state = _series_from_stem(path.stem)
+    if state != "ready":
+        raise ArchiveSafetyError("El nombre del CSV debe identificar una única serie R1–R5.")
+    if series in {"R0", "R0_1"}:
+        raise ArchiveSafetyError("R0/R0_1 es preliminar; no se procesa como serie formal.")
+    if header not in RAW_HEADERS:
+        raise ArchiveSafetyError("CSV no coincide con Relative_Time_s,ADC_Value[,Voltage_mV].")
+    return ZipRecording(
+        recording_id="REC0001",
+        participant_id=None,
+        side=_side_from_path(path.name),
+        series=series,
+        status="ready",
+        reason="CSV individual; no se infiere identidad ni grupo de participante.",
+        member_name=path.name,
+    )
+
+
 def _write_csv(path: Path, fields: Iterable[str], rows: Iterable[dict[str, object]]) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(fields), extrasaction="ignore")
@@ -383,6 +413,109 @@ def process_archive(zip_path: Path | str, output_base: Path | str, *, open_brows
     return run_dir
 
 
+def process_single_csv(csv_path: Path | str, output_base: Path | str, *, open_browser: bool = True) -> Path:
+    """Run the descriptive processor on one R1-R5 CSV, without cohort inference."""
+    csv_file = Path(csv_path).expanduser().resolve(strict=True)
+    base = Path(output_base).expanduser().resolve()
+    repository = Path(__file__).resolve().parents[1]
+    try:
+        validate_data_paths({"input_csv": csv_file, "output_dir": base}, repository)
+    except (ReleasePathError, OSError, ValueError) as error:
+        raise ArchiveSafetyError("El CSV y las salidas deben permanecer fuera del checkout público.") from error
+    record = discover_single_csv(csv_file)
+    run_dir = _new_run_dir(base)
+    record_output = run_dir / "recordings" / record.recording_id
+    processor = repository / "src" / "reproducir_emg_referencia.py"
+    row: dict[str, object] = {
+        "recording_id": record.recording_id,
+        "participant_pseudonym": "",
+        "side": record.side,
+        "series": record.series or "",
+        "status": "processing_error",
+        "reason": "El procesador no completó el CSV.",
+        "candidate_event_count": 0,
+        "output_folder": "",
+    }
+    candidates: list[dict[str, str]] = []
+    with tempfile.TemporaryDirectory(prefix="emg_csv_input_") as temp_name:
+        safe_source = Path(temp_name) / "REC0001.csv"
+        shutil.copyfile(csv_file, safe_source)
+        command = [
+            sys.executable,
+            str(processor),
+            "--input",
+            str(safe_source),
+            "--series",
+            str(record.series),
+            "--dashboard",
+            "--output-dir",
+            str(record_output),
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=repository,
+                capture_output=True,
+                text=True,
+                timeout=1800,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            row["reason"] = "El procesamiento superó el límite de 30 minutos."
+        else:
+            if completed.returncode == 0:
+                candidates_path = record_output / "activity_candidates.csv"
+                if candidates_path.is_file():
+                    with candidates_path.open("r", encoding="utf-8", newline="") as handle:
+                        candidates = list(csv.DictReader(handle))
+                row.update(
+                    status="processed",
+                    reason="Procesado; eventos son candidatos de actividad, no repeticiones verificadas.",
+                    candidate_event_count=len(candidates),
+                    output_folder=(Path("recordings") / record.recording_id).as_posix(),
+                )
+            else:
+                row["reason"] = f"El procesador devolvió código {completed.returncode}; revise la calidad y el esquema del CSV."
+
+    _write_csv(run_dir / "run_manifest.csv", MANIFEST_FIELDS, [row])
+    event_rows = [
+        {
+            "recording_id": record.recording_id,
+            "participant_pseudonym": "",
+            "side": record.side,
+            "series": record.series,
+            "event_candidate_index": index,
+            **event,
+        }
+        for index, event in enumerate(candidates, start=1)
+    ]
+    _write_csv(run_dir / "activity_event_candidates.csv", EVENT_FIELDS, event_rows)
+    processed = int(row["status"] == "processed")
+    summary: dict[str, object] = {
+        "analysis": "descriptive_raw_emg_pipeline",
+        "pipeline_version": "public_F56",
+        "input_csv_sha256": _sha256(csv_file),
+        "csv_count": 1,
+        "processed_count": processed,
+        "skipped_count": 1 - processed,
+        "candidate_event_count": len(candidates),
+        "model_loaded": False,
+        "mechanical_repetition_prediction": None,
+        "physiological_fatigue_prediction": None,
+        "input_scope": "one caller-supplied CSV; no cohort inference or participant identity",
+        "interpretation": (
+            "Features and activity candidates only. No validated repetition labels or independent "
+            "quadriceps fatigue target are available for this input."
+        ),
+        "private_output_warning": "Signals are embedded in per-recording dashboards; keep this folder restricted.",
+    }
+    (run_dir / "run_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _render_index(run_dir, summary, [row])
+    if open_browser and processed:
+        webbrowser.open((run_dir / "index.html").resolve().as_uri())
+    return run_dir
+
+
 def default_output_dir() -> Path:
     """Return a per-user local default, avoiding the commonly synced Documents folder."""
     local_appdata = os.environ.get("LOCALAPPDATA")
@@ -401,8 +534,8 @@ def _pick_paths() -> tuple[Path, Path] | None:
     root.withdraw()
     try:
         zip_name = filedialog.askopenfilename(
-            title="Seleccione el ZIP de grabaciones EMG",
-            filetypes=[("Archivos ZIP", "*.zip")],
+            title="Seleccione un CSV EMG o un ZIP de grabaciones",
+            filetypes=[("CSV EMG o ZIP", "*.csv *.zip"), ("CSV EMG", "*.csv"), ("Archivos ZIP", "*.zip")],
         )
         if not zip_name:
             return None
@@ -422,16 +555,17 @@ def _pick_paths() -> tuple[Path, Path] | None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Procesamiento descriptivo de CSV EMG dentro de ZIP; no ejecuta un modelo de fatiga ni valida repeticiones."
+        description="Procesamiento descriptivo de un CSV o un ZIP EMG; no ejecuta un modelo de fatiga ni valida repeticiones."
     )
-    parser.add_argument("--pick", action="store_true", help="abre selectores nativos para ZIP y carpeta de resultados")
+    parser.add_argument("--pick", action="store_true", help="abre selectores nativos para CSV/ZIP y carpeta de resultados")
+    parser.add_argument("--csv", type=Path, help="CSV de una grabación formal R1-R5")
     parser.add_argument("--zip", type=Path, help="ZIP de CSV EMG")
     parser.add_argument("--output-dir", type=Path, help="carpeta padre para resultados privados")
     parser.add_argument("--no-open", action="store_true", help="no abrir la página de resultados al terminar")
     args = parser.parse_args(argv)
     if args.pick:
-        if args.zip is not None or args.output_dir is not None:
-            parser.error("--pick no se combina con --zip/--output-dir")
+        if args.csv is not None or args.zip is not None or args.output_dir is not None:
+            parser.error("--pick no se combina con --csv/--zip/--output-dir")
         try:
             selected = _pick_paths()
         except RuntimeError as error:
@@ -439,22 +573,20 @@ def main(argv: list[str] | None = None) -> int:
         if selected is None:
             print("Selección cancelada; no se modificaron datos.")
             return 0
-        zip_path, output_dir = selected
+        input_path, output_dir = selected
     else:
-        if args.zip is None:
-            parser.error("indique --zip RUTA o use --pick")
-        zip_path = args.zip
-        if args.output_dir is None:
-            selected = _pick_paths()
-            if selected is None:
-                print("Selección cancelada; no se modificaron datos.")
-                return 0
-            _, output_dir = selected
-        else:
-            output_dir = args.output_dir
+        if (args.csv is None) == (args.zip is None):
+            parser.error("indique exactamente una de --csv RUTA, --zip RUTA o use --pick")
+        input_path = args.csv if args.csv is not None else args.zip
+        output_dir = args.output_dir or default_output_dir()
 
     try:
-        run_dir = process_archive(zip_path, output_dir, open_browser=not args.no_open)
+        if input_path.suffix.lower() == ".csv":
+            run_dir = process_single_csv(input_path, output_dir, open_browser=not args.no_open)
+        elif input_path.suffix.lower() == ".zip":
+            run_dir = process_archive(input_path, output_dir, open_browser=not args.no_open)
+        else:
+            raise ArchiveSafetyError("Elija un archivo CSV o ZIP.")
     except (ArchiveSafetyError, OSError, ValueError) as error:
         print(f"No se pudo procesar el ZIP: {error}", file=sys.stderr)
         return 2
