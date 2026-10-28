@@ -13,6 +13,7 @@ import hashlib
 import html
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -248,33 +249,198 @@ def _sha256(path: Path) -> str:
 
 
 def _render_index(run_dir: Path, summary: dict[str, object], rows: list[dict[str, object]]) -> None:
-    body_rows = []
+    """Write a single-page overview with a complete, non-overlapping event map."""
+    events: list[dict[str, str]] = []
+    events_path = run_dir / "activity_event_candidates.csv"
+    if events_path.is_file():
+        with events_path.open("r", encoding="utf-8", newline="") as handle:
+            events = list(csv.DictReader(handle))
+
+    by_record: dict[str, list[dict[str, str]]] = {}
+    for event in events:
+        by_record.setdefault(event.get("recording_id", ""), []).append(event)
+
+    def number(value: object, fallback: float = 0.0) -> float:
+        try:
+            result = float(value)
+        except (TypeError, ValueError):
+            return fallback
+        return result if result == result and abs(result) != float("inf") else fallback
+
+    record_rows: list[dict[str, object]] = []
+    max_time = 0.0
+    total_continuous_s = 0.0
     for row in rows:
-        dashboard = row.get("output_folder", "")
-        link = ""
-        if row.get("status") == "processed" and dashboard:
-            link = f'<a href="{html.escape(str(dashboard), quote=True)}/dashboard.html">Abrir señal y análisis</a>'
-        body_rows.append(
-            "<tr>"
-            + "".join(
-                f"<td>{html.escape(str(row.get(key, '')))}</td>"
-                for key in ("recording_id", "participant_pseudonym", "side", "series", "status", "candidate_event_count")
-            )
-            + f"<td>{link}</td></tr>"
+        recording_id = str(row.get("recording_id", ""))
+        record_events = sorted(
+            by_record.get(recording_id, []),
+            key=lambda event: (number(event.get("start_time_s")), number(event.get("end_time_s"))),
         )
+        lane_ends: list[float] = []
+        for event in record_events:
+            start = number(event.get("start_time_s"))
+            end = max(start, number(event.get("end_time_s"), start))
+            lane = next((i for i, lane_end in enumerate(lane_ends) if start >= lane_end - 1e-9), len(lane_ends))
+            if lane == len(lane_ends):
+                lane_ends.append(end)
+            else:
+                lane_ends[lane] = end
+            event["_lane"] = str(lane)
+            event["_duration_s"] = f"{max(0.0, end - start):.3f}"
+
+        segment_path = run_dir / "recordings" / recording_id / "segments.csv"
+        continuous_s = 0.0
+        record_end = max((number(event.get("end_time_s")) for event in record_events), default=0.0)
+        if segment_path.is_file():
+            with segment_path.open("r", encoding="utf-8", newline="") as handle:
+                for segment in csv.DictReader(handle):
+                    if segment.get("status") == "processed":
+                        start = number(segment.get("start_time_s"))
+                        end = number(segment.get("end_time_s"), start)
+                        continuous_s += max(0.0, end - start)
+                        record_end = max(record_end, end)
+        total_continuous_s += continuous_s
+        max_time = max(max_time, record_end)
+        record_rows.append({
+            **row,
+            "events": record_events,
+            "lane_count": max(1, len(lane_ends)),
+            "time_end_s": record_end,
+            "continuous_duration_s": continuous_s,
+        })
+    max_time = max(max_time, 1.0)
+
+    width, left, right = 1360, 310, 36
+    plot_width = width - left - right
+    row_heights = [max(34, 16 + int(item["lane_count"]) * 13) for item in record_rows]
+    height = 72 + sum(row_heights) + 64
+    tick_step = 5 if max_time <= 35 else 10
+    tick_max = max(tick_step, math.ceil(max_time / tick_step) * tick_step)
+    scale = plot_width / tick_max
+    ticks = []
+    for tick in range(0, tick_max + 1, tick_step):
+        x = left + tick * scale
+        ticks.append(
+            f'<line x1="{x:.2f}" y1="48" x2="{x:.2f}" y2="{height-45}" stroke="#d9e2ec"/>'
+            f'<text x="{x:.2f}" y="31" text-anchor="middle" class="axis">{tick}</text>'
+        )
+    svg_parts = [
+        f'<svg name="overall-activity-timeline" role="img" aria-label="All activity candidate intervals by recording, using each recording local time axis" viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg">',
+        '<style>.axis{font:13px Arial;fill:#405064}.rowlabel{font:13px Arial;fill:#233447}.muted{font:11px Arial;fill:#607286}</style>',
+        f'<text x="{left}" y="17" class="muted">Local time within each recording (s); recordings are separate, not concatenated in real time.</text>',
+        *ticks,
+    ]
+    y = 50
+    for item, row_height in zip(record_rows, row_heights):
+        side = str(item.get("side", "unknown"))
+        color = "#118ab2" if side == "right" else "#e07a29" if side == "left" else "#68778a"
+        participant = str(item.get("participant_pseudonym") or "Group unknown")
+        label = f'{item["recording_id"]} | {participant} | {side} | {item.get("series", "")}'
+        safe_label = html.escape(label)
+        svg_parts.append(f'<text x="{left-12}" y="{y+15}" text-anchor="end" class="rowlabel">{safe_label}</text>')
+        svg_parts.append(f'<line x1="{left}" y1="{y+row_height-2}" x2="{left+plot_width}" y2="{y+row_height-2}" stroke="#9aa8b6"/>')
+        for event in item["events"]:
+            start = max(0.0, number(event.get("start_time_s")))
+            end = max(start, number(event.get("end_time_s"), start))
+            event_y = y + 4 + int(event.get("_lane", "0")) * 13
+            x = left + start * scale
+            bar_width = max(2.0, (end - start) * scale)
+            idx = html.escape(str(event.get("event_candidate_index", "")), quote=True)
+            svg_parts.append(
+                f'<rect data-event="{idx}" data-lane="{event.get("_lane", "0")}" x="{x:.2f}" y="{event_y}" '
+                f'width="{bar_width:.2f}" height="9" rx="2" fill="{color}"><title>{safe_label}; candidate {idx}: '
+                f'{start:.3f}-{end:.3f} s; duration {max(0,end-start):.3f} s</title></rect>'
+            )
+        if not item["events"]:
+            svg_parts.append(f'<text x="{left+4}" y="{y+16}" class="muted">No activity candidate exported</text>')
+        y += row_height
+    svg_parts.append(f'<text x="{left + plot_width/2:.2f}" y="{height-12}" text-anchor="middle" class="axis">Time from start of recording (s)</text></svg>')
+    timeline_svg = "".join(svg_parts)
+
+    series_counts = {f"R{i}": {"left": 0, "right": 0, "unknown": 0} for i in range(1, 6)}
+    for event in events:
+        series = event.get("series", "")
+        side = event.get("side", "unknown")
+        if series in series_counts:
+            series_counts[series][side if side in {"left", "right"} else "unknown"] += 1
+    chart_width, chart_height = 860, 290
+    chart_left, chart_top, chart_plot_w, chart_plot_h = 72, 28, 750, 205
+    count_max = max((sum(counts.values()) for counts in series_counts.values()), default=1) or 1
+    count_scale = chart_plot_h / count_max
+    count_parts = [f'<svg name="candidate-counts-by-series" role="img" aria-label="Candidate activity intervals per series and side" viewBox="0 0 {chart_width} {chart_height}" xmlns="http://www.w3.org/2000/svg">']
+    for grid_index in range(5):
+        y_grid = chart_top + chart_plot_h * grid_index / 4
+        value = int(round(count_max * (1 - grid_index / 4)))
+        count_parts.append(f'<line x1="{chart_left}" y1="{y_grid:.1f}" x2="{chart_left+chart_plot_w}" y2="{y_grid:.1f}" stroke="#d9e2ec"/><text x="{chart_left-10}" y="{y_grid+4:.1f}" text-anchor="end" font-size="12" fill="#405064">{value}</text>')
+    bar_w = 42
+    for i, (series, sides) in enumerate(series_counts.items()):
+        total = sum(sides.values())
+        x_center = chart_left + (i + 0.5) * chart_plot_w / 5
+        bottom = chart_top + chart_plot_h
+        for side, color in (("left", "#e07a29"), ("right", "#118ab2"), ("unknown", "#68778a")):
+            value = sides[side]
+            bar_h = value * count_scale
+            if value:
+                count_parts.append(f'<rect x="{x_center-bar_w/2:.1f}" y="{bottom-bar_h:.1f}" width="{bar_w}" height="{bar_h:.1f}" fill="{color}"><title>{series} {side}: {value}</title></rect>')
+                bottom -= bar_h
+        count_parts.append(f'<text x="{x_center:.1f}" y="{chart_top+chart_plot_h+20}" text-anchor="middle" font-size="13" fill="#233447">{series}</text>')
+        count_parts.append(f'<text x="{x_center:.1f}" y="{max(chart_top+13,bottom-5):.1f}" text-anchor="middle" font-size="12" font-weight="bold" fill="#233447">{total}</text>')
+    count_parts.extend([
+        f'<rect x="{chart_left}" y="{chart_height-28}" width="12" height="12" fill="#e07a29"/><text x="{chart_left+18}" y="{chart_height-17}" font-size="12" fill="#405064">Left</text>',
+        f'<rect x="{chart_left+100}" y="{chart_height-28}" width="12" height="12" fill="#118ab2"/><text x="{chart_left+118}" y="{chart_height-17}" font-size="12" fill="#405064">Right</text>',
+        '</svg>',
+    ])
+    count_svg = "".join(count_parts)
+
+    manifest_rows = []
+    for item in record_rows:
+        manifest_rows.append(
+            "<tr>" + "".join(f"<td>{html.escape(str(item.get(key, '')))}</td>" for key in (
+                "recording_id", "participant_pseudonym", "side", "series", "status", "candidate_event_count"
+            )) + f'<td>{number(item["continuous_duration_s"]):.2f}</td></tr>'
+        )
+    event_table_rows = []
+    for event in sorted(events, key=lambda item: (
+        item.get("participant_pseudonym", ""), item.get("side", ""), item.get("series", ""),
+        number(item.get("start_time_s")), item.get("recording_id", ""),
+    )):
+        start = number(event.get("start_time_s"))
+        end = number(event.get("end_time_s"), start)
+        fields = (
+            event.get("recording_id", ""), event.get("participant_pseudonym", "") or "Group unknown",
+            event.get("side", ""), event.get("series", ""), event.get("event_candidate_index", ""),
+            f"{start:.3f}-{end:.3f}", f"{max(0.0, end-start):.3f}",
+            f"{number(event.get('threshold_rms_adc')):.2f}", f"{number(event.get('mean_rms_adc')):.2f}",
+            f"{number(event.get('peak_rms_adc')):.2f}", event.get("quality", ""),
+        )
+        event_table_rows.append("<tr>" + "".join(f"<td>{html.escape(str(value))}</td>" for value in fields) + "</tr>")
+
     html_text = f"""<!doctype html>
-<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Análisis EMG por grabación</title><style>
-body{{font:16px/1.5 Segoe UI,Arial,sans-serif;margin:2rem auto;max-width:1100px;padding:0 1rem;color:#17202a}}
-.warning{{border-left:5px solid #d99b19;background:#fff8e6;padding:1rem}}
-table{{border-collapse:collapse;width:100%;margin-top:1rem}}th,td{{border:1px solid #ccd2d8;padding:.55rem;text-align:left}}th{{background:#eef3f6}}
-</style></head><body><h1>Análisis descriptivo de señales EMG</h1>
-<div class="warning"><strong>Alcance:</strong> se muestran características de señal y eventos de activación candidatos.
-No se cargó un modelo; no se verificaron repeticiones mecánicas ni se predijo un nivel de fatiga.</div>
-<p>CSV reconocidos: {summary['csv_count']}; procesados: {summary['processed_count']}; preliminares/no evaluables: {summary['skipped_count']}; eventos candidatos: {summary['candidate_event_count']}.</p>
-<table><thead><tr><th>Registro</th><th>Participante</th><th>Lado</th><th>Serie</th><th>Estado</th><th>Eventos candidatos</th><th>Vista</th></tr></thead>
-<tbody>{''.join(body_rows)}</tbody></table>
-<p>La salida usa pseudónimos cuando el ZIP distingue carpetas de registro. Mantenga este informe y los tableros en almacenamiento autorizado: contienen señales procesadas.</p>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EMG analysis - full run overview</title><style>
+*{{box-sizing:border-box}} body{{font:15px/1.5 Segoe UI,Arial,sans-serif;margin:0 auto;max-width:1500px;padding:28px 3vw 56px;color:#17202a;background:#f6f8fa}}
+h1,h2{{line-height:1.2}} h1{{font-size:30px;margin:0 0 8px}} h2{{font-size:21px;margin:0 0 12px}}
+.sub{{color:#586879;margin:0 0 20px}} .warning{{border-left:6px solid #d99b19;background:#fff8e6;padding:14px 18px;margin:18px 0}}
+.status{{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:18px 0}}
+.status div,.section{{background:white;border:1px solid #d5dde5;border-radius:8px;padding:14px}}
+.status strong{{display:block;font-size:23px;color:#134e69}} .status span{{color:#586879;font-size:13px}}
+.section{{margin:16px 0 22px;overflow-x:auto}} figure{{margin:0;min-width:760px}} svg{{width:100%;height:auto;display:block}}
+.note{{color:#586879;font-size:13px;margin:10px 0 0}} table{{border-collapse:collapse;width:100%;margin-top:10px;background:#fff}}
+th,td{{border:1px solid #d5dde5;padding:6px 8px;text-align:left;font-variant-numeric:tabular-nums}} th{{background:#edf2f6;position:sticky;top:0}}
+.table-wrap{{max-height:560px;overflow:auto}} input{{padding:9px 10px;width:min(420px,100%);border:1px solid #aab7c4;border-radius:5px}}
+.fatigue{{background:#f3f4f6;border-left:6px solid #6b7280;padding:14px 18px}}
+</style></head><body>
+<h1>EMG activity candidates — complete run overview</h1>
+<p class="sub">One page for all CSVs in this run. Recording-specific time axes remain separate; no artificial continuous timeline is created.</p>
+<div class="warning"><strong>Model status:</strong> no predictive model was loaded. The intervals below are exploratory activity candidates from an RMS-envelope threshold, not verified mechanical repetitions.</div>
+<div class="fatigue"><strong>Fatigue prediction: unavailable.</strong> This run does not contain a validated quadriceps-fatigue model or independent fatigue labels. The system does not mark fatigue times or levels.</div>
+<div class="status"><div><strong>{summary.get('csv_count', 0)}</strong><span>CSV files recognized</span></div><div><strong>{summary.get('processed_count', 0)}</strong><span>recordings processed</span></div><div><strong>{summary.get('candidate_event_count', 0)}</strong><span>activity candidates</span></div><div><strong>{total_continuous_s/60:.1f} min</strong><span>summed continuous recording duration; files remain separate</span></div><div><strong>No</strong><span>model loaded or fatigue scores emitted</span></div></div>
+<section class="section"><h2>All event times across all recordings</h2><figure>{timeline_svg}</figure><p class="note">Each row uses the recording's own time from its start. If candidate intervals overlap within a recording, the chart stacks them in separate lanes without merging or dropping events. Bars mark threshold-derived intervals only.</p></section>
+<section class="section"><h2>Candidate intervals by series and side</h2><figure>{count_svg}</figure><p class="note">Counts include all exported activity candidates; they are not repetition counts.</p></section>
+<section class="section"><h2>Recording inventory</h2><div class="table-wrap"><table><thead><tr><th>Recording</th><th>Group</th><th>Side</th><th>Series</th><th>Status</th><th>Activity candidates</th><th>Summed continuous time (s)</th></tr></thead><tbody>{''.join(manifest_rows)}</tbody></table></div></section>
+<section class="section"><h2>Complete candidate event table</h2><label for="event-search">Filter rows by recording, group, side, series, time, or quality</label><br><input id="event-search" type="search" placeholder="Search this table"><div class="table-wrap"><table id="event-table"><thead><tr><th>Recording</th><th>Group</th><th>Side</th><th>Series</th><th>Candidate</th><th>Start-end (s)</th><th>Duration (s)</th><th>Envelope threshold (ADC)</th><th>Mean RMS (ADC)</th><th>Peak RMS (ADC)</th><th>Quality status</th></tr></thead><tbody>{''.join(event_table_rows)}</tbody></table></div></section>
+<p class="note">The stored Voltage_mV column is not validated as a physical calibration. ADC amplitude is reported in counts. Keep this report and source-derived results in restricted storage.</p>
+<script>document.getElementById('event-search').addEventListener('input',function(){{const q=this.value.toLowerCase();for(const row of document.querySelectorAll('#event-table tbody tr'))row.hidden=!row.textContent.toLowerCase().includes(q)}});</script>
 </body></html>"""
     (run_dir / "index.html").write_text(html_text, encoding="utf-8")
 

@@ -1,4 +1,10 @@
-# Análisis EMG — paquete público reproducible (actualización F59, 28 de octubre de 2026)
+# Análisis EMG — paquete público reproducible (actualización F60, 28 de octubre de 2026)
+
+## Actualización F60 — demo local para RAR `Pxx_setNN_dr/iz.csv`
+
+`INICIAR_DEMO_RAW_RAR.bat` puede procesar el RAR de este formato mediante el `tar.exe` de Windows: convierte `set01`–`set05` a `R1`–`R5`, cambia los códigos de participante a pseudónimos dentro de un ZIP temporal, y ejecuta el pipeline descriptivo CSV/ZIP. El archivo RAR original no se modifica y el ZIP temporal se borra al finalizar. La salida web local se guarda en `%LOCALAPPDATA%\EMG_Biomecanica\Resultados`. No publica los CSV ni los tableros.
+
+Para ejecutarlo desde PowerShell: `.\.venv\Scripts\python.exe src\ejecutar_demo_raw_rar.py --archive "$env:USERPROFILE\Downloads\raw.rar"`. El formato debe tener nombres planos como `P11_set01_dr.csv`, con las cinco series y ambos lados completos por cada código de participante. Esta equivalencia de `set01`–`set05` a `R1`–`R5` se basa en los nombres del archivo, no indica repeticiones mecánicas. Consulta [el recibo F60](reports/F60_RAW_RAR_DEMO.md) para verificar pruebas y límites.
 
 ## Actualización F59 — entrada CSV o ZIP y estado del lanzador
 
@@ -262,6 +268,14 @@ Para ejecutar un ZIP con varias grabaciones:
 El selector abre por defecto `%LOCALAPPDATA%\EMG_Biomecanica\Resultados` en Windows. Usa una ubicación con acceso restringido y evita rutas sincronizadas/compartidas. El programa rechaza salidas dentro del checkout, pero no verifica permisos, sincronización, copias de seguridad o retención. Las salidas incluyen un manifiesto por registro, candidatos de actividad, un índice HTML y tableros individuales; contienen señales procesadas y deben mantenerse en almacenamiento autorizado. No uses `participants.csv` como entrada.
 
 El nombre `INICIAR_INFERENCIA.bat` se conserva por compatibilidad, pero esta versión no hace inferencia de un modelo. No hay un checkpoint local de cuádriceps incluido ni un modelo predictivo desplegable: el benchmark disponible clasifica tercios temporales, no fatiga. El procesamiento de nuevos CSV o ZIP no predice repeticiones mecánicas ni niveles, probabilidades o localizaciones de fatiga. Los eventos son candidatos de actividad, no repeticiones verificadas. Consulta `reports/F59_CSV_ZIP_RUNNER_UPDATE.md` para pruebas y límites de esta actualización; `reports/F58_CSV_ONLY_UPDATE.md` es el antecedente histórico del bloqueo ZIP que este requerimiento más reciente reemplaza.
+
+Si los CSV están dentro del RAR `raw.rar` con nombres como `P11_set01_dr.csv`, usa `INICIAR_DEMO_RAW_RAR.bat` (doble clic, por defecto busca `%USERPROFILE%\Downloads\raw.rar`) o desde PowerShell ejecuta:
+
+```powershell
+.\.venv\Scripts\python.exe src\ejecutar_demo_raw_rar.py --archive "$env:USERPROFILE\Downloads\raw.rar"
+```
+
+El preparador RAR requiere `tar.exe` de Windows con soporte para ese archivo. Valida que cada código de participante tenga `set01`–`set05` para `dr` e `iz`, copia las señales a un ZIP temporal con nombres `P01`/`P02` y abre el `index.html` generado. El índice contiene una sola vista con la línea temporal separada por grabación, el resumen R1–R5/lado y una tabla filtrable con los tiempos de inicio y fin de todos los candidatos; no concatena relojes ni enlaza a tableros separados. El ZIP y el índice contienen señales, así que la carpeta de resultados debe mantenerse privada. El modo RAR no carga un modelo ni predice repeticiones o fatiga. No uses este modo para un RAR con otro patrón de nombres.
 ## Límites y uso
 
 La guía prescribe salida RAW y muestreo mínimo de 1 kHz por canal, además de ubicación de electrodos sobre recto femoral y ejercicio unilateral al 70 % de 1RM; esto define el protocolo objetivo, no certifica la adquisición de cada CSV. El intervalo mediano de timestamps es cercano a 1 ms (aproximadamente 1 kHz nominal), pero no identifica el reloj físico ni el ancho de banda analógico. En el archivo no se verifican por registro la modalidad RAW/RECT/ENV, calibración, sitio real del electrodo, carga, pausas, cadencia o repeticiones mecánicas. `Voltage_mV` reproduce una transformación aritmética de `ADC_Value`, no una calibración física validada. Por tanto, la conclusión correcta es que el estudio se dirige a un grupo muscular y ejercicio específicos, mientras los resultados disponibles describen tendencias del canal guardado y una tarea proxy; no demuestran fatiga fisiológica del recto femoral.

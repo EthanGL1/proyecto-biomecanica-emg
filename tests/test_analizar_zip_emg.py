@@ -18,6 +18,7 @@ from analizar_zip_emg import (
     discover_recordings,
     discover_single_csv,
     default_output_dir,
+    _render_index,
     main,
 )
 
@@ -111,6 +112,72 @@ class DefaultOutputDirectoryTests(unittest.TestCase):
                 default_output_dir(),
                 Path(r"C:\Users\tester\AppData\Local\EMG_Biomecanica\Resultados"),
             )
+
+
+class SinglePageOverallReportTests(unittest.TestCase):
+    def test_overall_html_shows_all_event_times_without_overlapping_lanes_or_record_links(self):
+        with tempfile.TemporaryDirectory() as temp_name:
+            run_dir = Path(temp_name)
+            rows = [
+                {
+                    "recording_id": "REC0001", "participant_pseudonym": "P01", "side": "right",
+                    "series": "R1", "status": "processed", "candidate_event_count": 2,
+                    "output_folder": "recordings/REC0001",
+                },
+                {
+                    "recording_id": "REC0002", "participant_pseudonym": "P02", "side": "left",
+                    "series": "R5", "status": "processed", "candidate_event_count": 1,
+                    "output_folder": "recordings/REC0002",
+                },
+            ]
+            with (run_dir / "activity_event_candidates.csv").open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=[
+                    "recording_id", "participant_pseudonym", "side", "series", "event_candidate_index",
+                    "start_time_s", "end_time_s", "duration_s", "threshold_rms_adc", "mean_rms_adc",
+                    "peak_rms_adc", "quality", "interpretation",
+                ])
+                writer.writeheader()
+                writer.writerows([
+                    {"recording_id": "REC0001", "participant_pseudonym": "P01", "side": "right", "series": "R1",
+                     "event_candidate_index": 1, "start_time_s": 0, "end_time_s": 2, "duration_s": 2,
+                     "threshold_rms_adc": 4, "mean_rms_adc": 5, "peak_rms_adc": 7,
+                     "quality": "common_mask_valid", "interpretation": "candidate_activity_only"},
+                    {"recording_id": "REC0001", "participant_pseudonym": "P01", "side": "right", "series": "R1",
+                     "event_candidate_index": 2, "start_time_s": 1, "end_time_s": 3, "duration_s": 2,
+                     "threshold_rms_adc": 4, "mean_rms_adc": 6, "peak_rms_adc": 8,
+                     "quality": "common_mask_valid", "interpretation": "candidate_activity_only"},
+                    {"recording_id": "REC0002", "participant_pseudonym": "P02", "side": "left", "series": "R5",
+                     "event_candidate_index": 1, "start_time_s": 2, "end_time_s": 3, "duration_s": 1,
+                     "threshold_rms_adc": 4, "mean_rms_adc": 5, "peak_rms_adc": 7,
+                     "quality": "common_mask_valid", "interpretation": "candidate_activity_only"},
+                ])
+            (run_dir / "recordings" / "REC0001").mkdir(parents=True)
+            (run_dir / "recordings" / "REC0002").mkdir(parents=True)
+            (run_dir / "recordings" / "REC0001" / "segments.csv").write_text(
+                "series,run_index,start_time_s,end_time_s,fs_hz,interval_spread_ratio,sample_count,common_valid_samples,excluded_edge_samples,status\n"
+                "R1,1,0,5,1000,0,5000,4900,100,processed\n", encoding="utf-8"
+            )
+            (run_dir / "recordings" / "REC0002" / "segments.csv").write_text(
+                "series,run_index,start_time_s,end_time_s,fs_hz,interval_spread_ratio,sample_count,common_valid_samples,excluded_edge_samples,status\n"
+                "R5,1,0,4,1000,0,4000,3900,100,processed\n", encoding="utf-8"
+            )
+            summary = {
+                "csv_count": 2, "processed_count": 2, "skipped_count": 0, "candidate_event_count": 3,
+                "model_loaded": False, "mechanical_repetition_prediction": None,
+                "physiological_fatigue_prediction": None,
+            }
+
+            _render_index(run_dir, summary, rows)
+            rendered = (run_dir / "index.html").read_text(encoding="utf-8")
+
+            self.assertIn("name=\"overall-activity-timeline\"", rendered)
+            self.assertIn("data-lane=\"0\"", rendered)
+            self.assertIn("data-lane=\"1\"", rendered)
+            self.assertIn("REC0002", rendered)
+            self.assertIn("Fatigue prediction: unavailable", rendered)
+            self.assertIn("0.000-2.000", rendered)
+            self.assertNotIn("recordings/REC0001/dashboard.html", rendered)
+            self.assertNotIn("<a href=", rendered)
 
 
 class DiscoverSingleCsvTests(unittest.TestCase):
