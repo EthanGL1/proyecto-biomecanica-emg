@@ -116,9 +116,12 @@ Para la señal centrada de cada ventana, RMS = sqrt((1/N) sum x_c[n]^2). Se esti
 - `datasets/README.md`: organización local segura; no incluye datos.
 - reports/: informe IEEE público F31, agregados F55, estado F54, resumen y heatmap por pierna/serie, nota metodológica y auditoría.
 - `presentation/`: guiones hablados de 10 minutos F59 en español e inglés, sincronizados con la presentación Canva; PDF del guion inglés F59 y generador reproducible. El generador usa la dependencia opcional en `presentation/requirements-pdf.txt`; no forma parte del entorno de análisis EMG.
+- `docs/PROJECT_STRUCTURE.md`: mapa del repositorio público y límites de la entrega local privada.
 - `manifest/SHA256SUMS`: hashes del paquete.
 
 El manifiesto contiene los SHA-256 de los bytes versionados de cada archivo rastreado, excepto el propio manifiesto. Así los hashes permanecen estables aunque un checkout de Windows convierta finales de línea LF/CRLF.
+
+La carpeta completa de auditoría `EMG_Integrador_Biomecanica` y su ZIP de entrega se mantienen fuera de este repositorio público porque contienen archivos RAW originales y resultados por grabación. El repositorio conserva código, documentación y agregados permitidos; no es un espejo de los datos privados.
 
 ## Reproducibilidad
 
