@@ -1,5 +1,7 @@
 # F57 — Lanzador de análisis EMG por ZIP y CSV individual
 
+> **Registro histórico:** esta nota describe la implementación original F57. La entrada ZIP fue retirada en la corrección posterior; consulta `reports/F58_CSV_ONLY_UPDATE.md` para el comportamiento vigente.
+
 Fecha: 2026-10-28
 Base de código: F56 (`71f0ed3de751cf69cb47ba22de12d2634a9481d3`)
 Rama local: `f57-oneclick-zip-analysis`

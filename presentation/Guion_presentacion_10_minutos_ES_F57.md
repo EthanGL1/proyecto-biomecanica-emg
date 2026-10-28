@@ -6,7 +6,7 @@
 
 **Presentación:** diseño Canva existente, “Defensa sEMG cuádriceps”, 10 diapositivas.
 
-**Demostración:** el lanzador F57 analiza descriptivamente un CSV R1–R5 o un ZIP compatible. No carga un modelo predictivo, no verifica repeticiones mecánicas ni estima fatiga fisiológica. No se recibió el ZIP independiente de dos pacientes, por lo que no se atribuyen resultados a esas personas.
+**Demostración:** el lanzador F57 procesa descriptivamente un CSV individual R1–R5 sin comprimir; rechaza ZIP y no extrae archivos comprimidos. No carga un modelo predictivo, no verifica repeticiones mecánicas ni estima fatiga fisiológica. No hay CSV individuales autorizados de los dos pacientes para mostrar resultados por paciente.
 
 ## Diapositiva 1 — EMG de cuádriceps durante extensión unilateral (00:30)
 
@@ -90,6 +90,6 @@ La fatiga puede modificar la actividad de las unidades motoras y el espectro EMG
 
 En R1 a R5 observamos un aumento medio de RMS activo y descensos medios de MDF y MNF. Solo el intervalo principal de MNF excluyó cero, con sensibilidad a la duración espectral. Los intervalos bilaterales incluyeron cero. No verificamos la modalidad física de la señal, calibración de voltaje, sitio del electrodo, carga real, pausas, cadencia ni marcadores mecánicos. El estudio describe tendencias del canal guardado; no confirma fatiga del recto femoral ni su inicio.
 
-Para la demostración, hacemos doble clic en `INICIAR_INFERENCIA.bat`. En el primer uso instala el entorno y ejecuta las comprobaciones. Elegimos un ZIP compatible o un CSV formal R1 a R5, y una carpeta privada de salida. El programa genera un manifiesto, eventos candidatos, un índice y tableros. Esta ejecución de un clic es descriptiva: no carga un modelo, no confirma repeticiones ni predice fatiga.
+Para la demostración, hacemos doble clic en `INICIAR_INFERENCIA.bat`. En el primer uso instala el entorno y ejecuta las comprobaciones. Elegimos un CSV formal R1 a R5 sin comprimir y una carpeta privada de salida. El lanzador procesa una grabación por ejecución; si hay varias, seleccionamos cada CSV por separado. Los ZIP se rechazan, incluso si se renombran como CSV. El programa genera un manifiesto, eventos candidatos, un índice y un tablero. Esta ejecución de un clic es descriptiva: no carga un modelo, no confirma repeticiones ni predice fatiga.
 
-El ZIP independiente de dos pacientes no se suministró; por eso no mostramos una inferencia ni resultados de esas personas. La prueba real registrada procesó una grabación de desarrollo y no es validación externa. Para validar repeticiones hacen falta marcas mecánicas sincronizadas; para validar fatiga, una referencia independiente y compatible. Muchas gracias.
+No se suministraron CSV individuales autorizados de los dos pacientes; por eso no mostramos una inferencia ni resultados de esas personas. La prueba real registrada procesó una grabación de desarrollo y no es validación externa. Para validar repeticiones hacen falta marcas mecánicas sincronizadas; para validar fatiga, una referencia independiente y compatible. Muchas gracias.
