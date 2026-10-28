@@ -271,6 +271,13 @@ class SinglePageOverallReportTests(unittest.TestCase):
             rendered = (run_dir / "index.html").read_text(encoding="utf-8")
             self.assertIn("No sustained spectral threshold crossing (not proof of no fatigue)", rendered)
             self.assertIn("Fatigue-compatible spectral change (exploratory; not confirmed)", rendered)
+            self.assertIn("fatigue-status-key", rendered)
+            self.assertIn("Cambio espectral compatible con fatiga (exploratorio; no confirmado)", rendered)
+            self.assertIn("Sin cruce sostenido del umbral (no demuestra ausencia de fatiga)", rendered)
+            self.assertIn("No evaluable: faltan ventanas activas o una línea basal estimable", rendered)
+            self.assertIn("no confirma fatiga fisiológica", rendered)
+            self.assertIn("no equivale a “sin fatiga”", rendered)
+            self.assertIn("Conteo de esta ejecución:</strong> 2 cambio(s) espectral(es) compatible(s), exploratorio(s); 1 sin cruce sostenido; 0 no evaluable(s), de 3 combinaciones", rendered)
 
 
 class DiscoverSingleCsvTests(unittest.TestCase):
